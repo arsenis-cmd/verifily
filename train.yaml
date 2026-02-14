@@ -1,0 +1,24 @@
+task: sft
+base_model: google/flan-t5-base
+seed: 42
+
+data_paths:
+  train: data/processed/human_train.jsonl
+  val: data/processed/human_val.jsonl
+  test: data/processed/human_test.jsonl
+
+training:
+  num_epochs: 3
+  batch_size: 8
+  learning_rate: 0.0002
+  max_seq_length: 512
+
+lora:
+  enabled: true
+  r: 16
+  alpha: 32
+  dropout: 0.05
+
+output:
+  dir: runs/
+  save_adapter_only: true

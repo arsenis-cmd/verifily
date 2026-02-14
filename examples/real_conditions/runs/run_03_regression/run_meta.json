@@ -1,0 +1,22 @@
+{
+  "run_id": "run_03_regression",
+  "status": "completed",
+  "task": "sft",
+  "base_model": "google/flan-t5-base",
+  "dataset_version": "train_v1",
+  "compute_mode": "local",
+  "device": "mps",
+  "started_at": "2026-02-08T10:00:00Z",
+  "completed_at": "2026-02-08T10:00:00Z",
+  "duration_seconds": 125.21632995776497,
+  "metrics": {
+    "train_loss": 0.49219218196852704
+  },
+  "artifact_path": "runs/run_03_regression",
+  "config_hash": "sha256:03c5e4187b1f86d826fe9d389acf631237162b62da11d168d8edce5c066f1d6d",
+  "data_hash": "sha256:a64c2a908795941a4daf7d1c9fdc05eecc99bb5abb610403f38b5c66dc61a2bb",
+  "environment_hash": "sha256:fac0e1945be8f8eb97e7aabc6ca83fd09e56d2d8ea99478fac8532675f0b29c0",
+  "reproducibility_hash": "sha256:8c834acd66d3125010059f31b276259d0f8e5b21c3408f39574d8008fddba31d",
+  "seed": 44,
+  "run_name": "run_03_regression"
+}

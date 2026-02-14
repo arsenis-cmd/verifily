@@ -1,0 +1,17 @@
+{
+  "python_version": "3.9.6",
+  "platform": "macOS-15.0-arm64-arm-64bit",
+  "os": "Darwin 25.0.0",
+  "packages": {
+    "torch": "2.1.2",
+    "transformers": "4.36.2",
+    "peft": "0.7.1",
+    "accelerate": "0.25.0",
+    "datasets": "2.16.1",
+    "verifily_train": "1.1.0"
+  },
+  "gpu": {
+    "name": "Apple MPS",
+    "count": 1
+  }
+}

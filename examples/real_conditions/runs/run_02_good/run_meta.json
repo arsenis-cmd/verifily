@@ -1,0 +1,22 @@
+{
+  "run_id": "run_02_good",
+  "status": "completed",
+  "task": "sft",
+  "base_model": "google/flan-t5-base",
+  "dataset_version": "train_v1",
+  "compute_mode": "local",
+  "device": "mps",
+  "started_at": "2026-02-08T10:00:00Z",
+  "completed_at": "2026-02-08T10:00:00Z",
+  "duration_seconds": 164.18827284984076,
+  "metrics": {
+    "train_loss": 0.5176699487422911
+  },
+  "artifact_path": "runs/run_02_good",
+  "config_hash": "sha256:3ccc5432b4e84811a04ffd80c1ea15298974d959c79564f4769bc8b2bfcc38f3",
+  "data_hash": "sha256:a64c2a908795941a4daf7d1c9fdc05eecc99bb5abb610403f38b5c66dc61a2bb",
+  "environment_hash": "sha256:fac0e1945be8f8eb97e7aabc6ca83fd09e56d2d8ea99478fac8532675f0b29c0",
+  "reproducibility_hash": "sha256:7f12acb2ad55288caf66cf6f3d1990cef80cc8ed1bbb01000cac0c9131c92d23",
+  "seed": 43,
+  "run_name": "run_02_good"
+}

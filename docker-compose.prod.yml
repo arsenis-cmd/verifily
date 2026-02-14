@@ -1,0 +1,108 @@
+# Production Docker Compose for Verifily
+#
+# Usage:
+#   docker-compose -f docker-compose.prod.yml up -d
+#   docker-compose -f docker-compose.prod.yml logs -f
+#   docker-compose -f docker-compose.prod.yml down
+#
+# Before first run:
+#   mkdir -p workspace
+#   cp .env.example .env
+
+version: "3.8"
+
+services:
+  verifily:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+    container_name: verifily
+    restart: unless-stopped
+    # Bind to localhost only on host for safety
+    # Use reverse proxy (caddy/nginx) for external access
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./workspace:/workspace
+      - ./logs:/var/log/verifily
+    environment:
+      # Core
+      VERIFILY_BIND: "0.0.0.0"
+      VERIFILY_PORT: "8080"
+      VERIFILY_PROD: "1"
+      
+      # Workspace
+      VERIFILY_WORKSPACE_ROOT: "/workspace"
+      VERIFILY_ALLOW_ABSPATH: "0"
+      
+      # Logging
+      VERIFILY_LOG_FORMAT: "json"
+      VERIFILY_LOG_LEVEL: "INFO"
+      
+      # Auth (choose one)
+      # Option 1: Legacy single key
+      # VERIFILY_API_KEY: "${VERIFILY_API_KEY}"
+      # Option 2: Org mode (recommended for multi-tenant)
+      VERIFILY_ORG_MODE: "1"
+      VERIFILY_ORG_PERSIST: "1"
+      VERIFILY_ORG_LOG_PATH: "/var/log/verifily/org.jsonl"
+      
+      # Rate limiting
+      VERIFILY_RATE_LIMIT_RPM: "60"
+      
+      # Persistence
+      VERIFILY_USAGE_PERSIST: "1"
+      VERIFILY_USAGE_LOG_PATH: "/var/log/verifily/usage.jsonl"
+      VERIFILY_JOBS_PERSIST: "1"
+      VERIFILY_JOBS_LOG_PATH: "/var/log/verifily/jobs.jsonl"
+      
+      # Features
+      VERIFILY_ENABLE_BILLING: "0"
+      VERIFILY_ENABLE_ADMIN: "1"
+      VERIFILY_ENABLE_DOCS: "0"  # Disable docs in production
+    env_file:
+      - .env.prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Reverse proxy with automatic TLS (Caddy)
+  caddy:
+    image: caddy:2-alpine
+    container_name: verifily-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - verifily
+    # Only start if Caddyfile exists
+    profiles:
+      - with-caddy
+
+  # Alternative: nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: verifily-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - verifily
+    profiles:
+      - with-nginx
+
+volumes:
+  caddy_data:
+  caddy_config:

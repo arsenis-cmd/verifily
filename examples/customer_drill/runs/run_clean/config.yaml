@@ -1,0 +1,19 @@
+task: sft
+base_model: google/flan-t5-base
+seed: 42
+data_paths:
+  train: datasets/customer_train_artifact/dataset.jsonl
+  test: raw/eval_clean.jsonl
+training:
+  num_epochs: 3
+  batch_size: 8
+  learning_rate: 0.0002
+  max_seq_length: 512
+lora:
+  enabled: true
+  r: 16
+  alpha: 32
+  dropout: 0.05
+output:
+  dir: runs/run_clean
+  save_adapter_only: true

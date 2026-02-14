@@ -1,0 +1,17 @@
+question,answer,context,category
+What is the capital of France?,Paris,Paris is the capital and most populous city of France.,qa_geography
+What color is the sky?,Blue,The sky appears blue due to Rayleigh scattering of sunlight.,qa_geography
+How do I reset my password?,Go to Settings > Security > Reset Password,Contact support at admin@example.com or call 555-123-4567 for help.,support
+Why is my order late?,Your order was delayed due to weather conditions,Contact john.doe@company.org or 800-555-0199 for tracking info.,support
+What is machine learning?,A subset of AI that learns from data,Machine learning uses algorithms to identify patterns in data without explicit programming.,qa_tech
+Explain gradient descent,An optimization algorithm that minimizes loss,Gradient descent iteratively adjusts parameters by moving in the direction of steepest decrease.,qa_tech
+How to install Python?,Download from python.org and run installer,Visit python.org/downloads and choose the version for your operating system.,support
+What is a neural network?,A computing system inspired by biological neurons,Neural networks consist of layers of interconnected nodes that process information.,qa_tech
+What is the capital of France?,Paris,Paris is the capital and most populous city of France.,qa_geography
+What is the capital of France?,Paris,Paris is the capital and most populous city of France.,qa_geography
+How to contact billing?,Email billing@example.com or call 555-987-6543,Our billing department is available Monday through Friday 9am to 5pm.,support
+What does API stand for?,Application Programming Interface,APIs define how software components interact with each other.,qa_tech
+What is photosynthesis?,Process plants use to convert light to energy,Plants convert carbon dioxide and water into glucose using sunlight.,qa_science
+Why do leaves change color?,Chlorophyll breaks down revealing other pigments,In autumn decreased sunlight causes trees to stop producing chlorophyll.,qa_science
+My account is locked,Contact support to unlock your account,If locked out email security@example.com with your account ID. Do not share passwords.,support
+How to export data?,Use the Export button in the Reports tab,Navigate to Reports then click Export CSV to download your data.,support

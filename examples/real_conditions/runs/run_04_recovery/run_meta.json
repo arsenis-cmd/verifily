@@ -1,0 +1,22 @@
+{
+  "run_id": "run_04_recovery",
+  "status": "completed",
+  "task": "sft",
+  "base_model": "google/flan-t5-base",
+  "dataset_version": "train_v1",
+  "compute_mode": "local",
+  "device": "mps",
+  "started_at": "2026-02-08T10:00:00Z",
+  "completed_at": "2026-02-08T10:00:00Z",
+  "duration_seconds": 133.1182784882162,
+  "metrics": {
+    "train_loss": 0.5005355288103362
+  },
+  "artifact_path": "runs/run_04_recovery",
+  "config_hash": "sha256:cbc4b0b100b7b502d90bf50cf744e8ff90535b14f47c210e8001fd303a403db0",
+  "data_hash": "sha256:a64c2a908795941a4daf7d1c9fdc05eecc99bb5abb610403f38b5c66dc61a2bb",
+  "environment_hash": "sha256:fac0e1945be8f8eb97e7aabc6ca83fd09e56d2d8ea99478fac8532675f0b29c0",
+  "reproducibility_hash": "sha256:c80fb341031f5fa44cf258f1dccd364ff11cd6e0b72be46b6a0cea6295903370",
+  "seed": 45,
+  "run_name": "run_04_recovery"
+}

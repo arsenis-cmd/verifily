@@ -1,0 +1,146 @@
+name: 'Verifily Gate'
+description: 'Run Verifily data quality gate in CI'
+author: 'Verifily'
+
+inputs:
+  config-path:
+    description: 'Path to verifily.yaml config file'
+    required: true
+    default: './verifily.yaml'
+  
+  project-path:
+    description: 'Path to project directory'
+    required: false
+    default: '.'
+  
+  base-url:
+    description: 'Verifily server URL'
+    required: false
+    default: 'http://localhost:8080'
+  
+  api-key:
+    description: 'API key for authentication'
+    required: false
+    default: ''
+  
+  plan:
+    description: 'Run in plan mode (dry-run)'
+    required: false
+    default: 'false'
+  
+  fail-on:
+    description: 'Fail pipeline on: error, warning, or never'
+    required: false
+    default: 'error'
+  
+  timeout:
+    description: 'Request timeout in seconds'
+    required: false
+    default: '60'
+  
+  version:
+    description: 'Verifily CLI version to use'
+    required: false
+    default: 'latest'
+
+outputs:
+  decision:
+    description: 'Gate decision (PASS, FAIL, or SKIP)'
+    value: ${{ steps.verifily.outputs.decision }}
+  
+  report-url:
+    description: 'URL to detailed report (if available)'
+    value: ${{ steps.verifily.outputs.report_url }}
+  
+  exit-code:
+    description: 'Exit code from verifily'
+    value: ${{ steps.verifily.outputs.exit_code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Verifily
+      shell: bash
+      run: |
+        # Install Verifily CLI
+        VERSION="${{ inputs.version }}"
+        if [ "$VERSION" = "latest" ]; then
+          pip install verifily
+        else
+          pip install verifily==$VERSION
+        fi
+        verifily --version
+
+    - name: Start Verifily Server (if local)
+      shell: bash
+      if: ${{ startsWith(inputs.base-url, 'http://localhost') }}
+      run: |
+        echo "Starting local Verifily server..."
+        verifily server --daemon
+        # Wait for server to be ready
+        for i in {1..30}; do
+          if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+            echo "Server is ready"
+            break
+          fi
+          sleep 1
+        done
+
+    - name: Run Verifily Gate
+      id: verifily
+      shell: bash
+      run: |
+        set +e  # Don't exit on error, capture exit code
+        
+        # Build command
+        CMD="verifily pipeline --config ${{ inputs.config-path }}"
+        
+        if [ -n "${{ inputs.project-path }}" ]; then
+          CMD="$CMD --project ${{ inputs.project-path }}"
+        fi
+        
+        if [ "${{ inputs.plan }}" = "true" ]; then
+          CMD="$CMD --plan"
+        fi
+        
+        CMD="$CMD --ci"
+        
+        # Export API key if provided
+        if [ -n "${{ inputs.api-key }}" ]; then
+          export VERIFILY_API_KEY="${{ inputs.api-key }}"
+        fi
+        
+        export VERIFILY_BASE_URL="${{ inputs.base-url }}"
+        
+        echo "Running: $CMD"
+        OUTPUT=$(eval $CMD 2>&1)
+        EXIT_CODE=$?
+        
+        echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+        
+        # Parse decision from output
+        if echo "$OUTPUT" | grep -q "PASS"; then
+          echo "decision=PASS" >> $GITHUB_OUTPUT
+        elif echo "$OUTPUT" | grep -q "FAIL"; then
+          echo "decision=FAIL" >> $GITHUB_OUTPUT
+        else
+          echo "decision=SKIP" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "Output:"
+        echo "$OUTPUT"
+        
+        # Handle fail-on setting
+        if [ "${{ inputs.fail-on }}" = "never" ]; then
+          exit 0
+        elif [ "${{ inputs.fail-on }}" = "warning" ] && [ $EXIT_CODE -gt 1 ]; then
+          exit $EXIT_CODE
+        elif [ "${{ inputs.fail-on }}" = "error" ] && [ $EXIT_CODE -ne 0 ]; then
+          exit $EXIT_CODE
+        fi
+        
+        exit 0
+
+branding:
+  icon: 'shield'
+  color: 'green'

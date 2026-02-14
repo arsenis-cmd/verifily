@@ -1,0 +1,8 @@
+{"input": "What is the capital of France?", "output": "The capital of France is Paris.", "tags": {"source": "human", "domain": "geography"}}
+{"input": "Explain the Pythagorean theorem.", "output": "In a right triangle, the square of the hypotenuse equals the sum of the squares of the other two sides: a^2 + b^2 = c^2.", "tags": {"source": "human", "domain": "math"}}
+{"input": "What is gradient descent?", "output": "Gradient descent is an optimization algorithm that iteratively adjusts parameters to minimize a loss function.", "tags": {"source": "synthetic", "domain": "cs"}}
+{"input": "Describe the structure of an atom.", "output": "An atom has a nucleus with protons and neutrons, surrounded by orbiting electrons.", "tags": {"source": "human", "domain": "chemistry"}}
+{"input": "What is natural selection?", "output": "Natural selection is the process where organisms with favorable traits survive and reproduce more successfully.", "tags": {"source": "human", "domain": "biology"}}
+{"input": "Define recursion.", "output": "Recursion is when a function calls itself to break a problem into smaller subproblems until a base case is reached.", "tags": {"source": "synthetic", "domain": "cs"}}
+{"input": "What is the Doppler effect?", "output": "The Doppler effect is the change in frequency of a wave relative to an observer moving relative to the source.", "tags": {"source": "human", "domain": "physics"}}
+{"input": "Explain supply and demand.", "output": "Supply and demand is an economic model where price is set by the relationship between available goods and buyer desire.", "tags": {"source": "human", "domain": "economics"}}

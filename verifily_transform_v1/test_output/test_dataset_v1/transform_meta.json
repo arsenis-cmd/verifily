@@ -1,0 +1,68 @@
+{
+  "transform_id": "transform_20260209_063835_29920a",
+  "status": "completed",
+  "created_at": "2026-02-09T06:38:35Z",
+  "config": {
+    "input": {
+      "path": "examples/raw_input_example.jsonl",
+      "format": "jsonl",
+      "encoding": "utf-8",
+      "text_column": null,
+      "label_column": null
+    },
+    "output": {
+      "dir": "test_output/",
+      "name": "test_dataset_v1"
+    },
+    "labeling": {
+      "task": "sft",
+      "strategy": "heuristic",
+      "instruction_field": "question",
+      "output_field": "answer",
+      "llm_model": null,
+      "llm_api_key_env": "OPENAI_API_KEY",
+      "label_map": null
+    },
+    "synthetic": {
+      "enabled": false,
+      "expansion_factor": 5,
+      "model": "gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY",
+      "temperature": 0.7,
+      "max_tokens": 512,
+      "batch_size": 10,
+      "filters": {
+        "min_length": 20,
+        "max_length": 512,
+        "leakage_check": true
+      }
+    },
+    "dedupe": {
+      "exact": true,
+      "fuzzy": false,
+      "fuzzy_threshold": 0.85,
+      "num_perm": 128
+    },
+    "privacy": {
+      "pii_removal": false,
+      "audit_log": false
+    },
+    "seed": 42
+  },
+  "output_dir": "test_output/test_dataset_v1",
+  "dataset_name": "test_dataset_v1",
+  "task": "sft",
+  "num_rows_final": 10,
+  "dataset_hash": "sha256:648a823df26fe61716f915dc4292e20fc3d4db580de5636564789d1ea860a884",
+  "config_hash": "sha256:67a00494859e27a10b098bbad36e76445b0dd90401256440aa8c95b3d0ecfd60",
+  "stats": {
+    "transform_id": "transform_20260209_063835_29920a",
+    "raw_rows": 10,
+    "normalized_rows": 10,
+    "labeled_rows": 10,
+    "deduped_rows": 10,
+    "filtered_rows": 10,
+    "rejections": {},
+    "duration_seconds": 0.0
+  }
+}

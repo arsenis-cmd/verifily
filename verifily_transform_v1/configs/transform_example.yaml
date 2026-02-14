@@ -1,0 +1,30 @@
+input:
+  path: data/raw/
+  format: jsonl
+
+output:
+  dir: datasets/
+  name: customer_support_v1
+
+labeling:
+  task: sft
+  strategy: heuristic+llm
+
+synthetic:
+  enabled: true
+  expansion_factor: 5
+  model: gpt-4o-mini
+  filters:
+    min_length: 20
+    max_length: 512
+    leakage_check: true
+
+dedupe:
+  exact: true
+  fuzzy: true
+
+privacy:
+  pii_removal: true
+  audit_log: true
+
+seed: 42

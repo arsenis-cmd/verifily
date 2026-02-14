@@ -1,0 +1,9 @@
+{
+  "files": {
+    "config.yaml": "272d81d79465b45885fe33a83668676d9d1b309114ba92e33f772efc0c904f62",
+    "environment.json": "1528eacbf0b70deae227f59790500407459ac66eb4c354c943542b0000cb678e",
+    "eval/eval_results.json": "76e3e17eecd69a7eb14d2f2d8336c683ab78a2a04a18f74922f75c5b1589fcbf",
+    "run_meta.json": "e90bd1f82c09e54d4a1ace712f5d74dbb8f3c33a0b07c84b4661f8466022d72f"
+  },
+  "chain_hash": "0f512c8ecd82fdf275d01efdf2db7917497a8cdbdf079191a17cf034e5119d51"
+}

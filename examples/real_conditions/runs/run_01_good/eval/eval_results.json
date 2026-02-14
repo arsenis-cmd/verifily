@@ -1,0 +1,47 @@
+{
+  "run_id": "run_01_good",
+  "test_data_path": "data/eval_clean.jsonl",
+  "num_examples": 20,
+  "overall": {
+    "exact_match": 0.5945,
+    "f1": 0.7139
+  },
+  "slices": {
+    "source": {
+      "human": {
+        "n": 12,
+        "exact_match": 0.6045,
+        "f1": 0.7239
+      },
+      "synthetic": {
+        "n": 8,
+        "exact_match": 0.5845,
+        "f1": 0.7039
+      }
+    },
+    "domain": {
+      "cs": {
+        "n": 6,
+        "exact_match": 0.5745,
+        "f1": 0.6939
+      },
+      "biology": {
+        "n": 5,
+        "exact_match": 0.6145,
+        "f1": 0.7339
+      },
+      "physics": {
+        "n": 4,
+        "exact_match": 0.5945,
+        "f1": 0.7139
+      },
+      "other": {
+        "n": 5,
+        "exact_match": 0.6045,
+        "f1": 0.7239
+      }
+    }
+  },
+  "hard_examples": [],
+  "eval_duration_seconds": 2.9394267984578835
+}

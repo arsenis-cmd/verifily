@@ -1,0 +1,12 @@
+{
+  "run_id": "run_clean",
+  "test_data_path": "raw/eval_clean.jsonl",
+  "num_examples": 10,
+  "overall": {
+    "exact_match": 0.6,
+    "f1": 0.72
+  },
+  "slices": {},
+  "hard_examples": [],
+  "eval_duration_seconds": 1.23
+}

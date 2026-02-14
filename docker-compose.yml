@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  verifily:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # Authentication (optional — leave empty to disable)
+      - VERIFILY_API_KEY=${VERIFILY_API_KEY:-}
+      # Rate limiting (optional — requests per minute per key)
+      - VERIFILY_RATE_LIMIT_RPM=${VERIFILY_RATE_LIMIT_RPM:-}
+      # Usage persistence (optional — set to 1 to persist usage data)
+      - VERIFILY_USAGE_PERSIST=${VERIFILY_USAGE_PERSIST:-0}
+      - VERIFILY_USAGE_LOG_PATH=${VERIFILY_USAGE_LOG_PATH:-/workspace/verifily_usage.jsonl}
+      # Jobs persistence (optional — set to 1 to persist job history)
+      - VERIFILY_JOBS_PERSIST=${VERIFILY_JOBS_PERSIST:-0}
+      - VERIFILY_JOBS_LOG_PATH=${VERIFILY_JOBS_LOG_PATH:-/workspace/verifily_jobs.jsonl}
+    volumes:
+      # Mount local workspace for configs, data, and outputs
+      - ./workspace:/workspace
+    restart: unless-stopped

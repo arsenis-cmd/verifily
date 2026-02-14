@@ -1,0 +1,102 @@
+# Example GitHub Actions workflow using Verifily Gate
+# This example shows how to integrate Verifily into your CI pipeline
+
+name: Verifily Data Quality Gate
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # ── Example 1: Basic gate check ──────────────────────────────
+  verifily-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Verifily Gate
+        uses: ./.github/actions/verifily-gate
+        with:
+          config-path: './verifily.yaml'
+          project-path: '.'
+          fail-on: 'error'
+
+  # ── Example 2: Gate with remote server ───────────────────────
+  verifily-remote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Verifily Gate (Remote)
+        uses: ./.github/actions/verifily-gate
+        with:
+          config-path: './verifily.yaml'
+          base-url: ${{ secrets.VERIFILY_SERVER_URL }}
+          api-key: ${{ secrets.VERIFILY_API_KEY }}
+          fail-on: 'error'
+
+  # ── Example 3: Regression failure example ────────────────────
+  # This job demonstrates a gate that fails on regression detection
+  verifily-regression-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download baseline
+        run: |
+          # Download previous run results for comparison
+          curl -o baseline.json ${{ secrets.VERIFILY_BASELINE_URL }}
+      
+      - name: Run Verifily with Regression Check
+        uses: ./.github/actions/verifily-gate
+        with:
+          config-path: './verifily.yaml'
+          fail-on: 'error'
+        continue-on-error: false
+      
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verifily-results
+          path: ./runs/
+
+  # ── Example 4: Contamination check ───────────────────────────
+  # This job demonstrates contamination detection in CI
+  verifily-contamination-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Contamination Check
+        run: |
+          verifily contamination \
+            --train data/train.jsonl \
+            --eval data/eval.jsonl \
+            --jaccard-cutoff 0.70
+        
+      - name: Check results
+        run: |
+          # Custom logic to handle contamination results
+          if [ -f "contamination_report.json" ]; then
+            echo "Contamination report generated"
+            cat contamination_report.json
+          fi
+
+  # ── Example 5: Parallel gates ────────────────────────────────
+  # Run multiple independent gates in parallel
+  verifily-parallel:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dataset: [train, eval, test]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run gate for ${{ matrix.dataset }}
+        uses: ./.github/actions/verifily-gate
+        with:
+          config-path: './configs/${{ matrix.dataset }}.yaml'
+          fail-on: 'warning'

@@ -1,0 +1,50 @@
+# Example: Text classification config for Verifily Train
+# Usage: verifily train --config examples/verifily_train/train_classification.yaml
+
+task: classification
+base_model: distilbert-base-uncased
+
+data_paths:
+  train: examples/verifily_train/sample_cls_data.jsonl
+  val: null
+  test: null
+
+training:
+  num_epochs: 5
+  batch_size: 16
+  gradient_accumulation_steps: 1
+  learning_rate: 5.0e-5
+  lr_scheduler: linear
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  max_seq_length: 256
+  eval_steps: 50
+  save_steps: 50
+  logging_steps: 10
+
+lora:
+  enabled: true
+  r: 8
+  alpha: 16
+  dropout: 0.1
+  target_modules: auto
+  quantization: none
+
+compute:
+  mode: local
+  device: auto
+  fp16: false
+  bf16: false
+
+eval:
+  enabled: true
+  metrics: [accuracy, macro_f1, confusion_matrix]
+  slice_by_tags: [source]
+  hard_examples: 20
+
+output:
+  dir: runs/
+  save_adapter_only: true
+
+seed: 42

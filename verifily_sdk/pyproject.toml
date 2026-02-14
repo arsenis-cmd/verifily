@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verifily-sdk"
+version = "1.0.0"
+description = "Python SDK for the Verifily API"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "httpx>=0.24.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]

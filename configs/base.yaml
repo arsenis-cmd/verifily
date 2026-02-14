@@ -1,0 +1,135 @@
+# Base configuration for human-synthetic experiment
+# This config will be auto-adjusted based on available hardware
+
+# Experiment metadata
+experiment_name: "human_synthetic_mvp"
+seed: 42
+
+# Hardware (will be auto-detected - now includes MPS for Apple Silicon)
+device: "auto"  # auto, cuda, mps, cpu
+auto_detect_hardware: true
+
+# Base model selection
+# Options: google/flan-t5-small, google/flan-t5-base, google/flan-t5-large
+base_model: "auto"  # Will choose based on available VRAM
+base_model_small: "google/flan-t5-small"  # 80M params, ~300MB
+base_model_medium: "google/flan-t5-base"  # 250M params, ~1GB
+base_model_large: "google/flan-t5-large"  # 780M params, ~3GB
+
+# Task configuration
+task: "qa_reasoning"
+max_input_length: 256
+max_output_length: 64
+
+# Dataset paths
+data_dir: "data"
+raw_dir: "data/raw"
+processed_dir: "data/processed"
+synthetic_dir: "data/synthetic"
+results_dir: "results"
+
+# Dataset sizes (will be auto-scaled based on hardware)
+human_train_size: 20000
+human_val_size: 2000
+human_test_size: 2000
+synthetic_multiplier: 5  # Generate 5x the human seed size
+
+# Source dataset
+# Using SQuAD for extractive QA (human-authored, context-question-answer format)
+source_dataset: "squad"
+source_config: null
+
+# Training hyperparameters
+training:
+  num_epochs: 3
+  batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 3.0e-4
+  warmup_steps: 100
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  eval_steps: 500
+  save_steps: 1000
+  logging_steps: 50
+  fp16: true  # Mixed precision (set to false if not supported)
+
+  # LoRA configuration
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_target_modules: ["q", "v"]
+
+# Generation hyperparameters for contamination
+contamination_generation:
+  model: "auto"  # Will use base_model or smaller
+  temperature: 0.3
+  top_p: 0.9
+  max_new_tokens: 64
+  num_return_sequences: 1
+  do_sample: true
+
+  # Contamination mix
+  pure_ai_ratio: 0.8  # 80% pure AI answers
+  paraphrased_ratio: 0.2  # 20% paraphrased AI answers
+
+# Generation hyperparameters for synthetic expansion
+synthetic_generation:
+  model: "auto"  # Will fine-tune base_model on human seed
+  temperature: 0.7
+  top_p: 0.92
+  max_new_tokens: 128
+  num_return_sequences: 1
+  do_sample: true
+
+  # Generation strategies
+  use_question_variants: true
+  use_context_augmentation: true
+  use_answer_explanation: true
+
+# Deduplication and quality filters
+filters:
+  # Exact duplicate removal
+  remove_exact_duplicates: true
+
+  # N-gram overlap filter (reject if overlap > threshold)
+  ngram_size: 8
+  max_ngram_overlap_ratio: 0.3
+
+  # Semantic similarity filter (disabled for MVP - lexical filters sufficient)
+  use_semantic_filter: false
+  semantic_model: "sentence-transformers/all-MiniLM-L6-v2"
+  max_semantic_similarity: 0.85
+
+  # Minimum quality thresholds
+  min_question_length: 10
+  min_answer_length: 3
+  max_answer_length: 200
+
+# Evaluation metrics
+evaluation:
+  metrics: ["exact_match", "f1", "rouge"]  # Removed bertscore (optional, very slow)
+  rouge_types: ["rouge1", "rouge2", "rougeL"]
+  bertscore_model: "microsoft/deberta-base-mnli"
+
+  # Generation parameters for evaluation
+  generation:
+    max_new_tokens: 64
+    num_beams: 4
+    temperature: 0.0  # Deterministic for eval
+    do_sample: false
+
+# Output paths
+outputs:
+  models_dir: "runs"
+  metrics_file: "results/metrics.jsonl"
+  metrics_table: "results/metrics_table.csv"
+  plots_dir: "results/plots"
+  report_dir: "report"
+
+# Logging
+logging:
+  level: "INFO"
+  log_file: "experiment.log"
+  save_config: true
+  save_environment: true

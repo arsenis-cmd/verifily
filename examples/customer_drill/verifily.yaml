@@ -1,0 +1,29 @@
+# Verifily customer drill pipeline config
+# Paths are relative to this file or absolute (set by scripts at runtime)
+#
+# This is a reference config. The demo scripts generate working configs
+# with absolute paths in /tmp/.
+
+# Schema and ingest mapping
+schema: sft
+ingest:
+  mapping:
+    question: subject
+    answer: resolution
+    context: body
+  tags:
+    source: customer_drill
+
+# Contamination thresholds
+contamination:
+  exact_threshold: 0.0     # any exact match = FAIL
+  near_threshold: 0.15     # >15% near-dups = WARN
+  jaccard_cutoff: 0.70
+
+# Pipeline settings (used by demo scripts)
+# run_dir, train_data, eval_data are set at runtime
+ship_if:
+  min_f1: 0.65
+  min_exact_match: 0.50
+  max_f1_regression: 0.03
+  max_pii_hits: 0

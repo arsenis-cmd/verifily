@@ -1,0 +1,114 @@
+# Example GitLab CI configuration using Verifily
+# Add this to your .gitlab-ci.yml file
+
+stages:
+  - validate
+  - test
+  - deploy
+
+variables:
+  VERIFILY_VERSION: "latest"
+  VERIFILY_BASE_URL: "http://localhost:8080"
+
+# Template for Verifily jobs
+.verifily_base:
+  image: verifily/verifily-ci:latest
+  before_script:
+    - verifily --version
+
+# ── Example 1: Basic gate check ──────────────────────────────
+verifily-gate:
+  extends: .verifily_base
+  stage: validate
+  script:
+    - verifily pipeline --config verifily.yaml --ci
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ── Example 2: Gate with plan mode (dry run) ──────────────────
+verifily-plan:
+  extends: .verifily_base
+  stage: validate
+  script:
+    - verifily pipeline --config verifily.yaml --plan --ci
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  allow_failure: true
+
+# ── Example 3: Regression failure example ────────────────────
+verifily-regression:
+  extends: .verifily_base
+  stage: test
+  script:
+    # Run gate and capture exit code
+    - |
+      verifily pipeline --config verifily.yaml --ci || EXIT_CODE=$?
+      if [ "$EXIT_CODE" -eq 1 ]; then
+        echo "Quality gate FAILED - blocking merge"
+        exit 1
+      elif [ "$EXIT_CODE" -eq 2 ]; then
+        echo "Quality gate WARNING - review recommended"
+      fi
+  artifacts:
+    when: always
+    paths:
+      - runs/
+    expire_in: 1 week
+
+# ── Example 4: Contamination check ───────────────────────────
+verifily-contamination:
+  extends: .verifily_base
+  stage: test
+  script:
+    - |
+      verifily contamination \
+        --train data/train.jsonl \
+        --eval data/eval.jsonl \
+        --jaccard-cutoff 0.70 \
+        --no-write
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - data/**/*
+
+# ── Example 5: Parallel dataset validation ───────────────────
+.validate-train:
+  extends: .verifily_base
+  stage: validate
+  script:
+    - verifily report --dataset data/train.jsonl --schema sft
+
+.validate-eval:
+  extends: .verifily_base
+  stage: validate
+  script:
+    - verifily report --dataset data/eval.jsonl --schema sft
+
+.validate-test:
+  extends: .verifily_base
+  stage: validate
+  script:
+    - verifily report --dataset data/test.jsonl --schema sft
+
+# ── Example 6: Using artifacts between jobs ──────────────────
+verifily-generate-report:
+  extends: .verifily_base
+  stage: test
+  script:
+    - verifily pipeline --config verifily.yaml --ci --output-format json > report.json
+  artifacts:
+    paths:
+      - report.json
+    reports:
+      junit: report.xml
+
+# ── Example 7: Scheduled monitoring ────────────────────────────
+verifily-monitor:
+  extends: .verifily_base
+  stage: test
+  script:
+    - verifily monitor --config verifily.yaml --duration 300
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  timeout: 10 minutes

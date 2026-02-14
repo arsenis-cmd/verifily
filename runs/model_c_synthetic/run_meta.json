@@ -1,0 +1,20 @@
+{
+  "run_id": "model_c_synthetic",
+  "status": "completed",
+  "task": "sft",
+  "base_model": "google/flan-t5-base",
+  "dataset_version": "synthetic_v1",
+  "compute_mode": "local",
+  "device": "mps",
+  "started_at": "2026-02-08T17:00:00Z",
+  "completed_at": "2026-02-08T17:35:12Z",
+  "duration_seconds": 2112.0,
+  "metrics": {"train_loss": 0.074},
+  "artifact_path": "runs/model_c_synthetic",
+  "config_hash": "sha256:c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+  "data_hash": "sha256:3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d",
+  "environment_hash": "sha256:f1e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e2",
+  "reproducibility_hash": "sha256:7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c",
+  "seed": 42,
+  "run_name": "Clean Synthetic"
+}

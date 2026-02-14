@@ -1,0 +1,50 @@
+# Example: SFT fine-tuning config for Verifily Train
+# Usage: verifily train --config examples/verifily_train/train_sft.yaml
+
+task: sft
+base_model: google/flan-t5-base   # 250M params — good for local dev
+
+data_paths:
+  train: examples/verifily_train/sample_sft_data.jsonl
+  val: null
+  test: null
+
+training:
+  num_epochs: 3
+  batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 2.0e-4
+  lr_scheduler: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  max_seq_length: 512
+  eval_steps: 100
+  save_steps: 100
+  logging_steps: 10
+
+lora:
+  enabled: true
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: auto
+  quantization: none
+
+compute:
+  mode: local
+  device: auto
+  fp16: false
+  bf16: false
+
+eval:
+  enabled: true
+  metrics: [exact_match, f1]
+  slice_by_tags: [source]
+  hard_examples: 20
+
+output:
+  dir: runs/
+  save_adapter_only: true
+
+seed: 42

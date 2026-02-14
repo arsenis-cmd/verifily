@@ -1,0 +1,47 @@
+{
+  "run_id": "run_03_regression",
+  "test_data_path": "data/eval_clean.jsonl",
+  "num_examples": 20,
+  "overall": {
+    "exact_match": 0.54,
+    "f1": 0.665
+  },
+  "slices": {
+    "source": {
+      "human": {
+        "n": 12,
+        "exact_match": 0.55,
+        "f1": 0.675
+      },
+      "synthetic": {
+        "n": 8,
+        "exact_match": 0.53,
+        "f1": 0.655
+      }
+    },
+    "domain": {
+      "cs": {
+        "n": 6,
+        "exact_match": 0.52,
+        "f1": 0.645
+      },
+      "biology": {
+        "n": 5,
+        "exact_match": 0.56,
+        "f1": 0.685
+      },
+      "physics": {
+        "n": 4,
+        "exact_match": 0.54,
+        "f1": 0.665
+      },
+      "other": {
+        "n": 5,
+        "exact_match": 0.55,
+        "f1": 0.675
+      }
+    }
+  },
+  "hard_examples": [],
+  "eval_duration_seconds": 3.1921795677048452
+}

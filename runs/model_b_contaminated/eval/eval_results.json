@@ -1,0 +1,16 @@
+{
+  "run_id": "model_b_contaminated",
+  "test_data_path": "data/processed/human_test.jsonl",
+  "num_examples": 2000,
+  "overall": {
+    "exact_match": 0.588,
+    "f1": 0.7057
+  },
+  "slices": {
+    "source": {
+      "squad_human_test": {"n": 2000, "exact_match": 0.588, "f1": 0.7057}
+    }
+  },
+  "hard_examples": [],
+  "eval_duration_seconds": 138.7
+}

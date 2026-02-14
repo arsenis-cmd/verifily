@@ -1,0 +1,6 @@
+{"text": "I love this product, it works perfectly!", "label": "positive", "tags": {"source": "human"}}
+{"text": "Terrible experience, would not recommend.", "label": "negative", "tags": {"source": "human"}}
+{"text": "It's okay, nothing special.", "label": "neutral", "tags": {"source": "human"}}
+{"text": "Amazing quality and fast shipping!", "label": "positive", "tags": {"source": "synthetic"}}
+{"text": "Broke after one day of use.", "label": "negative", "tags": {"source": "synthetic"}}
+{"text": "Does what it says, average product.", "label": "neutral", "tags": {"source": "synthetic"}}

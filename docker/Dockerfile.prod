@@ -1,0 +1,47 @@
+# Production Dockerfile for Verifily
+# 
+# Build: docker build -f docker/Dockerfile.prod -t verifily:prod .
+# Run:   docker run -p 8080:8080 -v ./workspace:/workspace verifily:prod
+
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code
+COPY verifily_cli_v1/ ./verifily_cli_v1/
+COPY verifily_sdk/ ./verifily_sdk/
+COPY setup.py pyproject.toml VERSION README.md ./
+
+# Install the package
+RUN pip install -e .
+
+# Create workspace directory
+RUN mkdir -p /workspace
+
+# Environment defaults
+ENV VERIFILY_WORKSPACE_ROOT=/workspace
+ENV VERIFILY_BIND=0.0.0.0
+ENV VERIFILY_PORT=8080
+ENV VERIFILY_PROD=1
+ENV VERIFILY_LOG_FORMAT=json
+ENV PYTHONUNBUFFERED=1
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/ready || exit 1
+
+# Run server
+CMD ["python", "-m", "verifily_cli_v1", "serve", "--host", "0.0.0.0", "--port", "8080", "--prod"]

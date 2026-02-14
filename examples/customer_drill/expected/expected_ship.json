@@ -1,0 +1,5 @@
+{
+  "recommendation": "SHIP",
+  "exit_code": 0,
+  "description": "Clean pipeline: no contamination, metrics above threshold"
+}

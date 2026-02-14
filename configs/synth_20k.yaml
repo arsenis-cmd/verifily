@@ -1,0 +1,37 @@
+# Synthetic generation config targeting 20k samples (matching A & B)
+# Using larger model for better quality synthesis
+device: 'mps'  # Use GPU for faster synthesis with larger model
+auto_detect_hardware: false
+base_model: 'google/flan-t5-xl'  # 3B params - much better at generation
+seed: 42
+
+# Paths
+data_dir: "data"
+processed_dir: "data/processed"
+synthetic_dir: "data/synthetic"
+
+# Target 20k to match Models A & B
+human_train_size: 20000
+synthetic_multiplier: 1  # Generate 1x = 20k
+
+# Generation parameters
+synthetic_generation:
+  model: "auto"
+  temperature: 0.8  # Higher for more diversity
+  top_p: 0.95
+  max_new_tokens: 256  # More tokens for better generation
+  num_return_sequences: 1
+  do_sample: true
+  use_question_variants: true
+  use_context_augmentation: true
+  use_answer_explanation: true
+
+# Quality filters (stricter with better model)
+filters:
+  remove_exact_duplicates: true
+  ngram_size: 8
+  max_ngram_overlap_ratio: 0.4  # Stricter with better model
+  use_semantic_filter: false  # Disable for speed
+  min_question_length: 4  # Allow shorter generated questions
+  min_answer_length: 1
+  max_answer_length: 200

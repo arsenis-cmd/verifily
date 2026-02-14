@@ -1,0 +1,5 @@
+{"instruction": "What is the capital of France?", "input": "", "output": "Paris", "tags": {"source": "human", "difficulty": "easy"}}
+{"instruction": "Summarize the following text.", "input": "Machine learning is a subset of artificial intelligence that gives systems the ability to learn from data without being explicitly programmed.", "output": "ML is an AI subset enabling systems to learn from data automatically.", "tags": {"source": "human", "difficulty": "medium"}}
+{"instruction": "Translate to French.", "input": "The weather is nice today.", "output": "Le temps est beau aujourd'hui.", "tags": {"source": "synthetic", "difficulty": "easy"}}
+{"instruction": "What year did World War II end?", "input": "", "output": "1945", "tags": {"source": "human", "difficulty": "easy"}}
+{"instruction": "Explain photosynthesis in one sentence.", "input": "", "output": "Photosynthesis is the process by which plants convert sunlight, water, and carbon dioxide into glucose and oxygen.", "tags": {"source": "synthetic", "difficulty": "medium"}}

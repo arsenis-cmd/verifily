@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Environments / secrets
+.env
+.env.*
+!.env.example
+credentials.json
+*.pem
+*.key
+
+# Data / persistence
+*.jsonl
+!/examples/**/*.jsonl
+/data/
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Package managers
+node_modules/
+package-lock.json
+
+# Next.js (website/)
+website/.next/
+website/out/
+
+# Temp
+tmp/
+*.tmp

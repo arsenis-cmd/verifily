@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verifily"
+version = "1.0.0"
+description = "ML data quality gate — ingest, validate, and ship datasets with confidence."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Verifily Team"},
+]
+
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+]
+sdk = [
+    "httpx>=0.24.0",
+    "pydantic>=2.0.0",
+]
+dev = [
+    "pytest>=7.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",
+]
+all = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",
+    "pytest>=7.0",
+]
+
+[project.scripts]
+verifily = "verifily_cli_v1.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["verifily_cli_v1*", "verifily_sdk*"]
+
+[tool.pytest.ini_options]
+testpaths = ["verifily_cli_v1/tests", "verifily_sdk/tests"]

@@ -1,0 +1,26 @@
+input:
+  path: examples/raw_input_example.jsonl
+  format: jsonl
+
+output:
+  dir: test_output/
+  name: test_dataset_v1
+
+labeling:
+  task: sft
+  strategy: heuristic
+  instruction_field: question
+  output_field: answer
+
+synthetic:
+  enabled: false
+
+dedupe:
+  exact: true
+  fuzzy: false
+
+privacy:
+  pii_removal: false
+  audit_log: false
+
+seed: 42

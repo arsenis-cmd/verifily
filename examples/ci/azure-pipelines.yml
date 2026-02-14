@@ -1,0 +1,138 @@
+# Example Azure DevOps pipeline using Verifily
+# Add this to your azure-pipelines.yml file
+
+trigger:
+  - main
+  - develop
+
+pr:
+  - main
+
+variables:
+  verifilyVersion: 'latest'
+
+jobs:
+  # ── Example 1: Basic gate check ──────────────────────────────
+  - job: VerifilyGate
+    displayName: 'Verifily Data Quality Gate'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - script: |
+          pip install verifily==$(verifilyVersion)
+          verifily --version
+        displayName: 'Install Verifily'
+
+      - script: |
+          verifily pipeline --config verifily.yaml --ci
+        displayName: 'Run Verifily Gate'
+        failOnStderr: true
+
+  # ── Example 2: Regression failure example ────────────────────
+  - job: RegressionCheck
+    displayName: 'Regression Detection'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - script: |
+          pip install verifily
+        displayName: 'Install Verifily'
+
+      - task: DownloadBuildArtifacts@1
+        inputs:
+          buildType: 'specific'
+          project: '$(System.TeamProject)'
+          pipeline: '$(System.DefinitionId)'
+          buildVersionToDownload: 'latestFromBranch'
+          branchName: 'refs/heads/main'
+          downloadType: 'single'
+          artifactName: 'baseline'
+          downloadPath: '$(System.ArtifactsDirectory)'
+        continueOnError: true
+
+      - script: |
+          verifily pipeline --config verifily.yaml --ci
+          echo "Exit code: $?"
+        displayName: 'Run Gate with Baseline'
+
+      - task: PublishBuildArtifacts@1
+        condition: always()
+        inputs:
+          PathtoPublish: 'runs/'
+          ArtifactName: 'verifily-results'
+          publishLocation: 'Container'
+
+  # ── Example 3: Contamination check ───────────────────────────
+  - job: ContaminationCheck
+    displayName: 'Data Contamination Check'
+    pool:
+      vmImage: 'ubuntu-latest'
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+    steps:
+      - script: |
+          pip install verifily
+        displayName: 'Install Verifily'
+
+      - script: |
+          verifily contamination \
+            --train data/train.jsonl \
+            --eval data/eval.jsonl \
+            --jaccard-cutoff 0.70
+        displayName: 'Check for Contamination'
+
+  # ── Example 4: Parallel dataset validation ───────────────────
+  - job: ValidateDatasets
+    displayName: 'Validate Datasets'
+    strategy:
+      parallel: 3
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - script: |
+          pip install verifily
+        displayName: 'Install Verifily'
+
+      - script: |
+          datasets=("train" "eval" "test")
+          index=$(($(Build.JobPositionInPhase) - 1))
+          dataset=${datasets[$index]}
+          echo "Validating $dataset dataset"
+          verifily report --dataset data/$dataset.jsonl --schema sft
+        displayName: 'Validate Dataset'
+
+  # ── Example 5: Full pipeline with conditions ─────────────────
+  - job: FullQualityGate
+    displayName: 'Full Quality Gate'
+    pool:
+      vmImage: 'ubuntu-latest'
+    dependsOn: 
+      - VerifilyGate
+      - ContaminationCheck
+    condition: succeeded()
+    steps:
+      - script: |
+          pip install verifily
+        displayName: 'Install Verifily'
+
+      - script: |
+          # Run full pipeline with all checks
+          verifily pipeline \
+            --config verifily.yaml \
+            --project . \
+            --ci \
+            --output-format json > verifily-report.json
+        displayName: 'Run Full Quality Gate'
+
+      - task: PublishTestResults@2
+        condition: always()
+        inputs:
+          testResultsFormat: 'JUnit'
+          testResultsFiles: '**/verifily-report.xml'
+          mergeTestResults: true
+          testRunTitle: 'Verifily Quality Gate'
+
+      - task: PublishCodeCoverageResults@1
+        condition: always()
+        inputs:
+          codeCoverageTool: 'Cobertura'
+          summaryFileLocation: '**/coverage.xml'

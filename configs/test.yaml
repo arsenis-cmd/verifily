@@ -1,0 +1,119 @@
+# Test configuration for quick CPU validation
+# This config will be used for testing the pipeline
+
+experiment_name: "human_synthetic_test"
+seed: 42
+
+# Hardware
+device: "cpu"
+auto_detect_hardware: true
+
+# Base model selection - use smallest for CPU testing
+base_model: "google/flan-t5-small"
+base_model_small: "google/flan-t5-small"
+base_model_medium: "google/flan-t5-base"
+base_model_large: "google/flan-t5-large"
+
+# Task configuration
+task: "qa_reasoning"
+max_input_length: 256
+max_output_length: 64
+
+# Dataset paths
+data_dir: "data"
+raw_dir: "data/raw"
+processed_dir: "data/processed"
+synthetic_dir: "data/synthetic"
+results_dir: "results"
+
+# SMALL dataset sizes for CPU testing
+human_train_size: 100  # Very small for testing
+human_val_size: 20
+human_test_size: 30
+synthetic_multiplier: 2  # Generate 2x (200 synthetic examples)
+
+# Source dataset
+source_dataset: "squad"
+source_config: null
+
+# Training hyperparameters - minimal for testing
+training:
+  num_epochs: 1  # Just 1 epoch for testing
+  batch_size: 2  # Very small batch
+  gradient_accumulation_steps: 2
+  learning_rate: 3.0e-4
+  warmup_steps: 10
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  eval_steps: 50
+  save_steps: 100
+  logging_steps: 10
+  fp16: false  # No fp16 on CPU
+
+  # LoRA configuration
+  use_lora: true
+  lora_r: 8  # Smaller rank for testing
+  lora_alpha: 16
+  lora_dropout: 0.1
+  lora_target_modules: ["q", "v"]
+
+# Generation hyperparameters for contamination
+contamination_generation:
+  model: "auto"
+  temperature: 0.3
+  top_p: 0.9
+  max_new_tokens: 64
+  num_return_sequences: 1
+  do_sample: true
+  pure_ai_ratio: 0.8
+  paraphrased_ratio: 0.2
+
+# Generation hyperparameters for synthetic expansion
+synthetic_generation:
+  model: "auto"
+  temperature: 0.7
+  top_p: 0.92
+  max_new_tokens: 128
+  num_return_sequences: 1
+  do_sample: true
+  use_question_variants: true
+  use_context_augmentation: true
+  use_answer_explanation: true
+
+# Deduplication and quality filters
+filters:
+  remove_exact_duplicates: true
+  ngram_size: 8
+  max_ngram_overlap_ratio: 0.3
+  use_semantic_filter: false  # Disable for speed in testing
+  semantic_model: "sentence-transformers/all-MiniLM-L6-v2"
+  max_semantic_similarity: 0.85
+  min_question_length: 5  # Lower for testing
+  min_answer_length: 2
+  max_answer_length: 200
+
+# Evaluation metrics
+evaluation:
+  metrics: ["exact_match", "f1", "rouge"]  # Skip bertscore for speed
+  rouge_types: ["rouge1", "rouge2", "rougeL"]
+  bertscore_model: "microsoft/deberta-base-mnli"
+  generation:
+    max_new_tokens: 64
+    num_beams: 2  # Fewer beams for testing
+    temperature: 0.0
+    do_sample: false
+
+# Output paths
+outputs:
+  models_dir: "runs"
+  metrics_file: "results/metrics.jsonl"
+  metrics_table: "results/metrics_table.csv"
+  plots_dir: "results/plots"
+  report_dir: "report"
+
+# Logging
+logging:
+  level: "INFO"
+  log_file: "experiment.log"
+  save_config: true
+  save_environment: true

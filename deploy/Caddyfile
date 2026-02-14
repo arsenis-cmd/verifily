@@ -1,0 +1,133 @@
+# Caddy reverse proxy configuration for Verifily
+# 
+# Usage:
+#   1. Set your domain name below
+#   2. Ensure DNS points to this server
+#   3. Run: docker-compose -f docker-compose.prod.yml --profile with-caddy up -d
+#
+# For local development without TLS, use the :8080 block.
+
+# -----------------------------------------------------------------------------
+# LOCAL DEVELOPMENT (no TLS)
+# -----------------------------------------------------------------------------
+# Uncomment for local testing without domain:
+# :80 {
+#     reverse_proxy verifily:8080
+#     
+#     # Log requests
+#     log {
+#         output stdout
+#         format json
+#     }
+#     
+#     # Compress responses
+#     encode gzip
+# }
+
+# -----------------------------------------------------------------------------
+# PRODUCTION (automatic TLS)
+# -----------------------------------------------------------------------------
+# Replace with your actual domain:
+# example.com {
+#     reverse_proxy verifily:8080
+#     
+#     # Automatic HTTPS via Let's Encrypt
+#     tls {
+#         # Use Let's Encrypt staging for testing:
+#         # ca https://acme-staging-v02.api.letsencrypt.org/directory
+#     }
+#     
+#     # Security headers
+#     header {
+#         # Enable HSTS (only if you're sure about HTTPS)
+#         # Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+#         
+#         # Prevent clickjacking
+#         X-Frame-Options "SAMEORIGIN"
+#         
+#         # XSS protection
+#         X-XSS-Protection "1; mode=block"
+#         
+#         # Content type sniffing
+#         X-Content-Type-Options "nosniff"
+#         
+#         # Referrer policy
+#         Referrer-Policy "strict-origin-when-cross-origin"
+#         
+#         # Remove server info
+#         -Server
+#     }
+#     
+#     # Log requests
+#     log {
+#         output file /var/log/caddy/access.log {
+#             roll_size 10MB
+#             roll_keep 5
+#             roll_keep_days 30
+#         }
+#         format json {
+#             time_format rfc3339
+#         }
+#     }
+#     
+#     # Compress responses
+#     encode gzip
+#     
+#     # Rate limiting (requires caddy-rate-limit plugin)
+#     # rate_limit {
+#     #     zone static_example {
+#     #         key static
+#     #         events 100
+#     #         window 1m
+#     #     }
+#     # }
+# }
+
+# -----------------------------------------------------------------------------
+# DEFAULT: Local-only (bind to localhost)
+# -----------------------------------------------------------------------------
+# This configuration is safe for local development.
+# The verifily service is only accessible via localhost:8080
+
+# Health check endpoint (no auth required)
+:80 {
+    # Health endpoint passthrough
+    handle /health {
+        reverse_proxy verifily:8080
+    }
+    
+    # Ready check endpoint
+    handle /ready {
+        reverse_proxy verifily:8080
+    }
+    
+    # Metrics endpoint (restrict access in production)
+    handle /metrics {
+        reverse_proxy verifily:8080
+    }
+    
+    # All other traffic to verifily
+    handle {
+        reverse_proxy verifily:8080 {
+            # Pass through original host header
+            header_up Host {host}
+            
+            # Pass through request ID for tracing
+            header_up X-Request-ID {http.request.header.X-Request-ID}
+            
+            # Pass through real client IP
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+    
+    # Basic logging
+    log {
+        output stdout
+        format json
+    }
+    
+    # Compression
+    encode gzip
+}
