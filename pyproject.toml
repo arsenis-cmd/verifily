@@ -29,6 +29,12 @@ sdk = [
     "httpx>=0.24.0",
     "pydantic>=2.0.0",
 ]
+arrow = [
+    "pyarrow>=14.0.0",
+]
+pii = [
+    "spacy>=3.5.0",
+]
 dev = [
     "pytest>=7.0",
     "fastapi>=0.100.0",
@@ -42,6 +48,8 @@ all = [
     "pydantic>=2.0.0",
     "httpx>=0.24.0",
     "pytest>=7.0",
+    "pyarrow>=14.0.0",
+    "spacy>=3.5.0",
 ]
 
 [project.scripts]

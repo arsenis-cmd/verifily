@@ -19,61 +19,24 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# ── PII patterns (never output raw matches, counts only) ────────
+# ── PII patterns (from centralized pii module) ──────────────────
 
-_EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}")
-_PHONE_RE = re.compile(
-    r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}"
-)
+from verifily_cli_v1.core.pii import PII_PATTERNS as _PII_PATTERNS
 
-# ── Schema field signatures ──────────────────────────────────────
+_EMAIL_RE = _PII_PATTERNS["email"]
+_PHONE_RE = _PII_PATTERNS["phone"]
 
-_SFT_FIELDS = [
-    {"prompt", "completion"},
-    {"input", "output"},
-    {"instruction", "output"},
-    {"instruction", "response"},
-    {"question", "answer"},  # also QA but without context
-]
+# ── Schema detection (from centralized schemas module) ────────────
 
-_QA_FIELDS = [
-    {"question", "context", "answer"},
-    {"passage", "question", "answer"},
-    {"context", "question", "answer"},
-]
-
-_CLASSIFICATION_FIELDS = [
-    {"text", "label"},
-    {"body", "category"},
-    {"input", "label"},
-    {"sentence", "label"},
-    {"text", "class"},
-]
-
-_CHAT_FIELDS = [
-    {"messages"},
-    {"conversations"},
-]
+from verifily_cli_v1.core.schemas import SCHEMA_REGISTRY, detect_schema_from_fields
 
 
 def _detect_schema(fields: set) -> str:
     """Detect the most likely schema from a row's field names."""
-    lower_fields = {f.lower() for f in fields}
-    # QA checked before SFT because QA is SFT + context
-    for sig in _QA_FIELDS:
-        if sig.issubset(lower_fields):
-            return "qa"
-    for sig in _SFT_FIELDS:
-        if sig.issubset(lower_fields):
-            return "sft"
-    for sig in _CLASSIFICATION_FIELDS:
-        if sig.issubset(lower_fields):
-            return "classification"
-    for sig in _CHAT_FIELDS:
-        if sig.issubset(lower_fields):
-            # Chat rows: check if 'messages' value is a list of dicts with role/content
-            return "chat"
-    return "unknown"
+    try:
+        return detect_schema_from_fields(fields)
+    except ValueError:
+        return "unknown"
 
 
 def _detect_row_schema(row: Dict[str, Any]) -> str:

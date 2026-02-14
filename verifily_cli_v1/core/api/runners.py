@@ -147,6 +147,10 @@ def run_contamination_api(
     eval_path: str,
     jaccard_cutoff: float = 0.70,
     out_path: Optional[str] = None,
+    num_perm: int = 128,
+    use_lsh: bool = True,
+    sample_train: Optional[int] = None,
+    sample_eval: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Run contamination check and return result dict."""
     from verifily_cli_v1.commands.contamination import check_contamination
@@ -154,6 +158,8 @@ def run_contamination_api(
     t0 = time.monotonic()
     result = check_contamination(
         train_path, eval_path, jaccard_cutoff=jaccard_cutoff,
+        num_perm=num_perm, use_lsh=use_lsh,
+        sample_train=sample_train, sample_eval=sample_eval,
     )
     elapsed_ms = int((time.monotonic() - t0) * 1000)
 
@@ -182,12 +188,14 @@ def run_report_api(
     schema: str = "sft",
     sample: int = 0,
     out_dir: Optional[str] = None,
+    use_ner: bool = False,
+    min_confidence: float = 0.0,
 ) -> Dict[str, Any]:
     """Run dataset report and return result dict."""
     from verifily_cli_v1.commands.report import dataset_report
 
     t0 = time.monotonic()
-    report = dataset_report(dataset_path, schema=schema)
+    report = dataset_report(dataset_path, schema=schema, use_ner=use_ner, min_confidence=min_confidence)
     elapsed_ms = int((time.monotonic() - t0) * 1000)
 
     # PII summary: counts only, never raw PII

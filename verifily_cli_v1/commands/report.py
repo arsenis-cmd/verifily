@@ -5,24 +5,15 @@ from __future__ import annotations
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from rich.console import Console
 from rich.table import Table
 
 from verifily_cli_v1.core.io import read_jsonl, write_json
+from verifily_cli_v1.core.pii import PII_PATTERNS, scan_dataset as pii_scan_dataset
 
 console = Console(stderr=True)
-
-# ── PII patterns ────────────────────────────────────────────────
-
-PII_PATTERNS = {
-    "email": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
-    "phone": re.compile(r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"),
-    "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    "ip_address": re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"),
-    "credit_card": re.compile(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"),
-}
 
 
 # ── Public API ──────────────────────────────────────────────────
@@ -30,6 +21,9 @@ PII_PATTERNS = {
 def dataset_report(
     dataset_path: Union[str, Path],
     schema: str = "sft",
+    *,
+    use_ner: bool = False,
+    min_confidence: float = 0.0,
 ) -> Dict[str, Any]:
     """Generate a report for a JSONL dataset.
 
@@ -72,18 +66,11 @@ def dataset_report(
                 tag_dist[k][str(v)] += 1
     tag_distribution = {k: dict(v.most_common()) for k, v in tag_dist.items()}
 
-    # PII scan
-    pii_results: Dict[str, Dict[str, Any]] = {}
-    for pii_type, pattern in PII_PATTERNS.items():
-        hits: List[int] = []
-        for i, row in enumerate(rows):
-            text = " ".join(str(v) for k, v in row.items() if k != "tags")
-            if pattern.search(text):
-                hits.append(i)
-        pii_results[pii_type] = {"count": len(hits), "rows": hits[:10]}
-
-    pii_clean = all(r["count"] == 0 for r in pii_results.values())
-    total_pii = sum(r["count"] for r in pii_results.values())
+    # PII scan (using unified scanner)
+    pii_result = pii_scan_dataset(rows, use_ner=use_ner, min_confidence=min_confidence)
+    pii_results = pii_result["pii_scan"]
+    pii_clean = pii_result["pii_clean"]
+    total_pii = pii_result["pii_total_hits"]
 
     return {
         "path": str(dataset_path),
@@ -105,9 +92,11 @@ def run(
     schema: str = "sft",
     output: str | None = None,
     verbose: bool = False,
+    use_ner: bool = False,
+    min_confidence: float = 0.0,
 ) -> Dict[str, Any]:
     """Generate and display dataset report. Returns report dict."""
-    report = dataset_report(dataset, schema=schema)
+    report = dataset_report(dataset, schema=schema, use_ner=use_ner, min_confidence=min_confidence)
 
     console.print(f"\n[bold]Dataset Report:[/bold] {dataset}\n")
 

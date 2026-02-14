@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
+import random
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from rich.console import Console
 from rich.table import Table
 
 from verifily_cli_v1.core.hashing import sha256_string
 from verifily_cli_v1.core.io import read_jsonl, write_json
+from verifily_cli_v1.core.minhash_lsh import MinHashLSH, minhash_jaccard
+from verifily_cli_v1.core.schemas import SCHEMA_REGISTRY, get_content_fields
 
 console = Console(stderr=True)
 
@@ -36,11 +39,32 @@ def _jaccard(a: Set[str], b: Set[str]) -> float:
 
 
 def _row_text(row: Dict[str, Any]) -> str:
-    """Extract searchable text from a row (excludes tags)."""
+    """Extract searchable text from a row (excludes tags).
+
+    Uses schema-aware content fields when possible, falls back to hardcoded list.
+    """
+    # Try all known content fields across all schemas
+    content_keys: Set[str] = set()
+    for schema_def in SCHEMA_REGISTRY.values():
+        content_keys.update(schema_def.content_fields)
+    # Always include these as fallbacks
+    content_keys.update({"instruction", "output", "input", "question", "answer", "context", "text"})
+
     parts = []
-    for key in ("instruction", "output", "input", "question", "answer", "context", "text"):
+    for key in sorted(content_keys):
         if key in row and row[key]:
-            parts.append(str(row[key]).strip())
+            val = row[key]
+            if isinstance(val, list):
+                # Handle chat messages
+                for item in val:
+                    if isinstance(item, dict):
+                        content = item.get("content", "")
+                        if content:
+                            parts.append(str(content).strip())
+                    elif isinstance(item, str):
+                        parts.append(item.strip())
+            else:
+                parts.append(str(val).strip())
     return " ".join(parts) if parts else json.dumps(row, sort_keys=True)
 
 
@@ -54,6 +78,10 @@ def check_contamination(
     near_threshold: float = 0.15,
     jaccard_cutoff: float = 0.70,
     ngram_size: int = 3,
+    num_perm: int = 128,
+    use_lsh: bool = True,
+    sample_train: Optional[int] = None,
+    sample_eval: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Check for contamination between train and eval datasets.
 
@@ -64,63 +92,94 @@ def check_contamination(
         near_threshold: max allowed near-duplicate fraction before WARN
         jaccard_cutoff: Jaccard similarity threshold for near-duplicate
         ngram_size: character n-gram size for Jaccard
+        num_perm: number of MinHash permutations (LSH mode)
+        use_lsh: if True, use MinHash LSH for O(N) near-dup detection
+        sample_train: if set, deterministically sample this many train rows
+        sample_eval: if set, deterministically sample this many eval rows
 
     Returns:
-        {
-            "train_rows": int,
-            "eval_rows": int,
-            "exact_overlaps": int,
-            "exact_overlap_fraction": float,
-            "exact_overlap_indices": [(train_idx, eval_idx)],
-            "near_duplicates": int,
-            "near_duplicate_fraction": float,
-            "near_duplicate_pairs": [(train_idx, eval_idx, similarity)],
-            "status": "PASS" | "FAIL" | "WARN",
-            "exit_code": 0 | 1 | 2,
-            "reasons": [str],
-        }
+        Dict with status, exit_code, overlap counts, etc.
     """
     train_rows = read_jsonl(train_path)
     eval_rows = read_jsonl(eval_path)
 
+    # Deterministic sampling
+    sampled = False
+    if sample_train and len(train_rows) > sample_train:
+        train_rows = random.Random(42).sample(train_rows, sample_train)
+        sampled = True
+    if sample_eval and len(eval_rows) > sample_eval:
+        eval_rows = random.Random(42).sample(eval_rows, sample_eval)
+        sampled = True
+
     # Build train hash index
     train_hashes: Dict[str, int] = {}
     train_texts: List[str] = []
-    train_ngrams: List[Set[str]] = []
+    train_ngrams_list: List[Set[str]] = []
 
     for i, row in enumerate(train_rows):
         text = _row_text(row)
         h = sha256_string(text)
         train_hashes[h] = i
         train_texts.append(text)
-        train_ngrams.append(_ngrams(text, ngram_size))
+        train_ngrams_list.append(_ngrams(text, ngram_size))
 
-    # Check eval rows
+    # Check eval rows — exact matches first
     exact_overlaps: List[Tuple[int, int]] = []
     near_dupes: List[Tuple[int, int, float]] = []
     exact_eval_indices: Set[int] = set()
 
+    eval_texts: List[str] = []
+    eval_ngrams_list: List[Set[str]] = []
+    non_exact_eval_indices: List[int] = []
+
     for j, row in enumerate(eval_rows):
         text = _row_text(row)
         h = sha256_string(text)
+        eval_texts.append(text)
 
-        # Exact match
         if h in train_hashes:
             exact_overlaps.append((train_hashes[h], j))
             exact_eval_indices.add(j)
-            continue
+        else:
+            eval_ngrams_list.append(_ngrams(text, ngram_size))
+            non_exact_eval_indices.append(j)
 
-        # Near-duplicate (skip if already exact)
-        eval_ng = _ngrams(text, ngram_size)
-        best_sim = 0.0
-        best_train_idx = -1
-        for i, tng in enumerate(train_ngrams):
-            sim = _jaccard(eval_ng, tng)
-            if sim > best_sim:
-                best_sim = sim
-                best_train_idx = i
-        if best_sim >= jaccard_cutoff:
-            near_dupes.append((best_train_idx, j, round(best_sim, 4)))
+    # Near-duplicate detection
+    method = "brute_force"
+    if use_lsh and len(train_texts) > 0 and len(non_exact_eval_indices) > 0:
+        method = "lsh"
+        # Build LSH index on train
+        lsh = MinHashLSH(num_perm=num_perm, threshold=jaccard_cutoff, seed=42)
+        for i, tng in enumerate(train_ngrams_list):
+            lsh.insert(i, tng)
+
+        # Query each non-exact eval row
+        for idx_in_non_exact, j in enumerate(non_exact_eval_indices):
+            eval_ng = eval_ngrams_list[idx_in_non_exact]
+            candidates = lsh.query(eval_ng)
+            best_sim = 0.0
+            best_train_idx = -1
+            for cand_i in candidates:
+                sim = _jaccard(eval_ng, train_ngrams_list[cand_i])
+                if sim > best_sim:
+                    best_sim = sim
+                    best_train_idx = cand_i
+            if best_sim >= jaccard_cutoff:
+                near_dupes.append((best_train_idx, j, round(best_sim, 4)))
+    else:
+        # Brute-force fallback (original O(N^2) path)
+        for idx_in_non_exact, j in enumerate(non_exact_eval_indices):
+            eval_ng = eval_ngrams_list[idx_in_non_exact]
+            best_sim = 0.0
+            best_train_idx = -1
+            for i, tng in enumerate(train_ngrams_list):
+                sim = _jaccard(eval_ng, tng)
+                if sim > best_sim:
+                    best_sim = sim
+                    best_train_idx = i
+            if best_sim >= jaccard_cutoff:
+                near_dupes.append((best_train_idx, j, round(best_sim, 4)))
 
     # Compute fractions
     eval_count = len(eval_rows)
@@ -172,6 +231,9 @@ def check_contamination(
         "status": status,
         "exit_code": exit_code,
         "reasons": reasons,
+        "method": method,
+        "num_perm": num_perm if method == "lsh" else 0,
+        "sampled": sampled,
     }
 
 
@@ -184,11 +246,19 @@ def run(
     jaccard_cutoff: float = 0.70,
     output: str | None = None,
     verbose: bool = False,
+    num_perm: int = 128,
+    use_lsh: bool = True,
+    sample_train: Optional[int] = None,
+    sample_eval: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Run contamination check. Returns result dict."""
     result = check_contamination(
         train, eval_set,
         jaccard_cutoff=jaccard_cutoff,
+        num_perm=num_perm,
+        use_lsh=use_lsh,
+        sample_train=sample_train,
+        sample_eval=sample_eval,
     )
 
     console.print(f"\n[bold]Contamination Check[/bold]")

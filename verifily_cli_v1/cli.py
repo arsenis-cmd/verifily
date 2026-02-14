@@ -372,10 +372,16 @@ def report(
         ..., "--dataset", "-d", help="Path to JSONL dataset file."
     ),
     schema: str = typer.Option(
-        "sft", "--schema", "-s", help="Expected schema: sft or classification."
+        "sft", "--schema", "-s", help="Expected schema: sft, classification, chat, qa, etc."
     ),
     output: Optional[str] = typer.Option(
         None, "--output", "-o", help="Write JSON report to file."
+    ),
+    use_ner: bool = typer.Option(
+        False, "--ner/--no-ner", help="Use spaCy NER for PII detection (requires pip install verifily[pii])."
+    ),
+    pii_confidence: float = typer.Option(
+        0.0, "--pii-confidence", help="Minimum confidence threshold for PII matches."
     ),
     verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
 ) -> None:
@@ -383,15 +389,19 @@ def report(
 
     Example:
       verifily report --dataset data/train.jsonl
+      verifily report --dataset data/train.jsonl --ner
       verifily report --dataset data/train.jsonl --output report.json
     """
     _run_safe(
-        lambda: _report_impl(dataset, schema, output, verbose),
+        lambda: _report_impl(dataset, schema, output, verbose, use_ner, pii_confidence),
         verbose=verbose,
     )
 
 
-def _report_impl(dataset: str, schema: str, output: Optional[str], verbose: bool) -> None:
+def _report_impl(
+    dataset: str, schema: str, output: Optional[str], verbose: bool,
+    use_ner: bool = False, pii_confidence: float = 0.0,
+) -> None:
     ds_path = Path(dataset)
     if not ds_path.exists():
         console.print(f"[red bold]Error:[/red bold] Dataset not found: {ds_path}")
@@ -399,7 +409,8 @@ def _report_impl(dataset: str, schema: str, output: Optional[str], verbose: bool
         console.print("      or check the path and try again.")
         raise SystemExit(1)
     from verifily_cli_v1.commands.report import run
-    run(dataset=dataset, schema=schema, output=output, verbose=verbose)
+    run(dataset=dataset, schema=schema, output=output, verbose=verbose,
+        use_ner=use_ner, min_confidence=pii_confidence)
 
 
 # ── contamination ───────────────────────────────────────────────
@@ -415,6 +426,18 @@ def contamination(
     jaccard_cutoff: float = typer.Option(
         0.70, "--jaccard", help="Jaccard similarity cutoff for near-duplicates."
     ),
+    num_perm: int = typer.Option(
+        128, "--num-perm", help="Number of MinHash permutations for LSH."
+    ),
+    no_lsh: bool = typer.Option(
+        False, "--no-lsh", help="Disable LSH, use brute-force O(N^2) comparison."
+    ),
+    sample_train: Optional[int] = typer.Option(
+        None, "--sample-train", help="Deterministically sample N train rows."
+    ),
+    sample_eval: Optional[int] = typer.Option(
+        None, "--sample-eval", help="Deterministically sample N eval rows."
+    ),
     output: Optional[str] = typer.Option(
         None, "--output", "-o", help="Write JSON results to file."
     ),
@@ -422,15 +445,21 @@ def contamination(
 ) -> None:
     """Detect train/eval contamination via exact and near-duplicate matching.
 
+    Uses MinHash LSH by default for scalable O(N) near-duplicate detection.
+    Use --no-lsh to fall back to brute-force O(N^2) comparison.
+
     Exit codes: 0=PASS, 1=FAIL (exact leaks), 2=WARN (near-duplicates).
 
     Example:
       verifily contamination --train data/train.jsonl --eval data/eval.jsonl
+      verifily contamination --train train.jsonl --eval eval.jsonl --num-perm 128
     """
     def _impl():
         from verifily_cli_v1.commands.contamination import run
         result = run(train=train, eval_set=eval_set, jaccard_cutoff=jaccard_cutoff,
-                     output=output, verbose=verbose)
+                     output=output, verbose=verbose, num_perm=num_perm,
+                     use_lsh=not no_lsh, sample_train=sample_train,
+                     sample_eval=sample_eval)
         raise SystemExit(result["exit_code"])
 
     _run_safe(_impl, verbose=verbose)
@@ -554,14 +583,14 @@ def contract_check(
 @app.command()
 def ingest(
     input_path: str = typer.Option(
-        ..., "--in", help="Input CSV or JSONL file."
+        ..., "--in", help="Input CSV, JSONL, or Parquet file."
     ),
     output_path: str = typer.Option(
         ..., "--out", help="Output dataset artifact directory."
     ),
     schema: str = typer.Option(
         "auto", "--schema", "-s",
-        help="Target schema: sft, classification, or auto (detect from columns).",
+        help="Target schema: auto, sft, classification, chat, qa, summarization, translation, rm_pairwise.",
     ),
     map_args: Optional[list[str]] = typer.Option(
         None, "--map",
@@ -583,22 +612,30 @@ def ingest(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate and preview without writing files.",
     ),
+    expand_chat: bool = typer.Option(
+        True, "--expand-chat/--no-expand-chat",
+        help="Expand chat messages into SFT pairs (default: True).",
+    ),
+    flatten_sep: str = typer.Option(
+        ".", "--flatten-sep", help="Separator for flattened nested field names.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
 ) -> None:
-    """Convert CSV or JSONL into a canonical Verifily dataset artifact.
+    """Convert CSV, JSONL, or Parquet into a canonical Verifily dataset artifact.
 
     Produces: dataset.jsonl, manifest.json, hashes.json, report.json.
 
     Examples:
       verifily ingest --in data.csv --out datasets/v1 --schema sft
+      verifily ingest --in data.parquet --out datasets/v1 --schema auto
       verifily ingest --in data.csv --out datasets/v1 --map question:prompt --map answer:completion
       verifily ingest --in data.jsonl --out datasets/v1 --schema auto --tag source:customer
-      verifily ingest --in data.csv --out datasets/v1 --schema classification --dry-run
+      verifily ingest --in chat.jsonl --out datasets/v1 --schema chat
     """
     _run_safe(
         lambda: _ingest_impl(
             input_path, output_path, schema, map_args, tag_args,
-            id_col, limit, strict, dry_run, verbose,
+            id_col, limit, strict, dry_run, verbose, expand_chat, flatten_sep,
         ),
         verbose=verbose,
     )
@@ -609,6 +646,7 @@ def _ingest_impl(
     map_args: Optional[list[str]], tag_args: Optional[list[str]],
     id_col: Optional[str], limit: Optional[int],
     strict: bool, dry_run: bool, verbose: bool,
+    expand_chat: bool = True, flatten_sep: str = ".",
 ) -> None:
     from verifily_cli_v1.commands.ingest import run
     run(
@@ -622,6 +660,8 @@ def _ingest_impl(
         strict=strict,
         dry_run=dry_run,
         verbose=verbose,
+        expand_chat=expand_chat,
+        flatten_sep=flatten_sep,
     )
 
 

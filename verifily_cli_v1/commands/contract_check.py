@@ -10,11 +10,16 @@ from rich.console import Console
 from rich.table import Table
 
 from verifily_cli_v1.core.io import read_json, read_jsonl
+from verifily_cli_v1.core.schemas import SCHEMA_REGISTRY, get_schema, schema_names
 
 console = Console(stderr=True)
 
-# ── Schema definitions ──────────────────────────────────────────
+# ── Schema definitions (from centralized registry) ────────────────
 
+# Build SCHEMAS dict from registry — each required_group is treated as an
+# independent valid combination (either "required" or "alternates").
+# The original v1.0 SCHEMAS for SFT expected `instruction + output` as primary
+# with `question + answer` and `input + output` as alternates.
 SCHEMAS: Dict[str, Dict[str, Any]] = {
     "sft": {
         "required": ["instruction", "output"],
@@ -30,6 +35,23 @@ SCHEMAS: Dict[str, Dict[str, Any]] = {
         "alternates": [],
     },
 }
+
+# Add remaining schemas from registry (new in v1.1)
+for _name, _schema_def in SCHEMA_REGISTRY.items():
+    if _name in SCHEMAS:
+        continue
+    _required = list(_schema_def.required_groups[0]) if _schema_def.required_groups else []
+    _alternates = []
+    for _group in _schema_def.required_groups[1:]:
+        _alternates.append({field: field for field in _group})
+    for _alt in _schema_def.alternates:
+        if isinstance(_alt, dict):
+            _alternates.append(_alt)
+    SCHEMAS[_name] = {
+        "required": _required,
+        "optional": list(_schema_def.optional),
+        "alternates": _alternates,
+    }
 
 # Files required for a valid run contract
 RUN_CONTRACT_FILES = [

@@ -17,26 +17,18 @@ from rich.table import Table
 
 from verifily_cli_v1.core.hashing import sha256_file, sha256_string
 from verifily_cli_v1.core.io import ensure_dir, read_jsonl, write_json, write_jsonl
+from verifily_cli_v1.core.pii import PII_PATTERNS, scan_dataset as pii_scan_dataset
+from verifily_cli_v1.core.readers import read_dataset
+from verifily_cli_v1.core.flatten import flatten_rows
+from verifily_cli_v1.core.schemas import (
+    SCHEMA_REGISTRY,
+    detect_schema_from_fields,
+    get_schema,
+    get_text_fields,
+    schema_names,
+)
 
 console = Console(stderr=True)
-
-# ── PII patterns (reused from report.py) ────────────────────────
-
-PII_PATTERNS = {
-    "email": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
-    "phone": re.compile(r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"),
-    "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    "ip_address": re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"),
-    "credit_card": re.compile(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"),
-}
-
-# ── Schema definitions ──────────────────────────────────────────
-
-# Canonical required fields per schema.
-SCHEMA_REQUIRED = {
-    "sft": [["input", "output"], ["question", "answer"]],  # either group
-    "classification": [["text", "label"]],                   # only one group
-}
 
 
 # ── Reading helpers ─────────────────────────────────────────────
@@ -51,15 +43,18 @@ def read_csv_rows(path: Union[str, Path]) -> List[Dict[str, str]]:
     return rows
 
 
-def read_input_file(path: Union[str, Path]) -> List[Dict[str, Any]]:
-    """Read CSV or JSONL, auto-detected by extension."""
-    p = Path(path)
-    ext = p.suffix.lower()
-    if ext == ".csv":
-        return read_csv_rows(p)
-    if ext in (".jsonl", ".jsonlines"):
-        return read_jsonl(p)
-    raise ValueError(f"Unsupported file extension '{ext}'. Use .csv or .jsonl.")
+def read_input_file(path: Union[str, Path]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Read CSV, JSONL, or Parquet, auto-detected by extension.
+
+    Returns (rows, provenance) tuple.
+    """
+    result = read_dataset(path)
+    return result.rows, {
+        "format": result.format,
+        "source_path": result.source_path,
+        "columns": result.columns,
+        **result.provenance,
+    }
 
 
 # ── Column mapping ──────────────────────────────────────────────
@@ -120,22 +115,7 @@ def detect_schema(rows: List[Dict[str, Any]]) -> str:
     if not rows:
         raise ValueError("Cannot auto-detect schema: no rows in input.")
     keys = set(rows[0].keys())
-    # SFT patterns
-    if ("input" in keys and "output" in keys) or (
-        "question" in keys and "answer" in keys
-    ):
-        return "sft"
-    # Classification pattern
-    if "text" in keys and "label" in keys:
-        return "classification"
-    raise ValueError(
-        f"Cannot auto-detect schema from columns: {sorted(keys)}.\n"
-        "Expected one of:\n"
-        "  sft:            input + output  OR  question + answer\n"
-        "  classification: text + label\n"
-        "Hint: use --map to rename your columns, e.g. "
-        "--map question:prompt --map answer:completion"
-    )
+    return detect_schema_from_fields(keys)
 
 
 # ── Row validation ──────────────────────────────────────────────
@@ -145,7 +125,8 @@ def _has_required(row: Dict[str, Any], schema: str) -> Tuple[bool, str]:
 
     Returns (ok, reason).
     """
-    groups = SCHEMA_REQUIRED[schema]
+    schema_def = get_schema(schema)
+    groups = schema_def.required_groups
     for group in groups:
         if all(k in row and str(row[k]).strip() for k in group):
             return True, ""
@@ -182,6 +163,38 @@ def canonicalize_row(
     elif schema == "classification":
         canonical["text"] = str(row.get("text", "")).strip()
         canonical["label"] = str(row.get("label", "")).strip()
+
+    elif schema == "qa":
+        context = str(row.get("context", row.get("passage", ""))).strip()
+        question = str(row.get("question", "")).strip()
+        answer = str(row.get("answer", "")).strip()
+        if context:
+            canonical["input"] = f"Context:\n{context}\n\nQuestion:\n{question}"
+        else:
+            canonical["input"] = question
+        canonical["output"] = answer
+
+    elif schema == "chat":
+        # Chat rows should already be expanded by flatten_rows into SFT pairs
+        canonical["input"] = str(row.get("input", "")).strip()
+        canonical["output"] = str(row.get("output", "")).strip()
+
+    elif schema == "summarization":
+        document = str(row.get("document", row.get("article", row.get("text", row.get("source", ""))))).strip()
+        summary = str(row.get("summary", row.get("highlights", row.get("target", "")))).strip()
+        canonical["input"] = document
+        canonical["output"] = summary
+
+    elif schema == "translation":
+        source = str(row.get("source", row.get("src", ""))).strip()
+        target = str(row.get("target", row.get("tgt", ""))).strip()
+        canonical["input"] = source
+        canonical["output"] = target
+
+    elif schema == "rm_pairwise":
+        canonical["prompt"] = str(row.get("prompt", "")).strip()
+        canonical["chosen"] = str(row.get("chosen", "")).strip()
+        canonical["rejected"] = str(row.get("rejected", "")).strip()
 
     # Tags: merge extra_tags (don't override existing keys)
     existing_tags = row.get("tags", {})
@@ -225,7 +238,10 @@ def generate_report(
     """Generate a lightweight report for the ingested dataset."""
     # Field length stats
     field_stats: Dict[str, Dict[str, Any]] = {}
-    text_fields = ["input", "output"] if schema == "sft" else ["text"]
+    try:
+        text_fields = get_text_fields(schema)
+    except KeyError:
+        text_fields = ["input", "output"] if schema == "sft" else ["text"]
 
     for field in text_fields:
         lengths = [_token_count(str(r.get(field, ""))) for r in rows]
@@ -253,15 +269,12 @@ def generate_report(
     duplicate_rate = duplicate_count / total if total else 0.0
 
     # PII scan (counts only)
-    pii_counts: Dict[str, int] = {}
-    for pii_type, pattern in PII_PATTERNS.items():
-        hits = 0
-        for r in rows:
-            text = " ".join(str(v) for k, v in r.items() if k != "tags")
-            if pattern.search(text):
-                hits += 1
-        pii_counts[pii_type] = hits
-    pii_total = sum(pii_counts.values())
+    pii_result = pii_scan_dataset(rows)
+    pii_counts: Dict[str, int] = {
+        pii_type: info["count"]
+        for pii_type, info in pii_result["pii_scan"].items()
+    }
+    pii_total = pii_result["pii_total_hits"]
 
     return {
         "row_count": total,
@@ -272,7 +285,7 @@ def generate_report(
         "unique_rows": unique,
         "pii_scan": pii_counts,
         "pii_total_hits": pii_total,
-        "pii_clean": pii_total == 0,
+        "pii_clean": pii_result["pii_clean"],
     }
 
 
@@ -287,6 +300,8 @@ def write_artifacts(
     row_count_in: int,
     dropped: List[Dict[str, Any]],
     extra_tags: Dict[str, str],
+    input_provenance: Optional[Dict[str, Any]] = None,
+    input_format: str = "",
 ) -> Dict[str, Any]:
     """Write dataset.jsonl, manifest.json, hashes.json, report.json.
 
@@ -334,6 +349,8 @@ def write_artifacts(
         "tag_distribution": tag_summary,
         "created_at": datetime.datetime.utcnow().isoformat() + "Z",
         "verifily_version": ver,
+        "input_provenance": input_provenance or {},
+        "input_format": input_format,
     }
     write_json(out / "manifest.json", manifest)
 
@@ -366,6 +383,8 @@ def ingest(
     limit: Optional[int] = None,
     strict: bool = False,
     dry_run: bool = False,
+    expand_chat: bool = True,
+    flatten_sep: str = ".",
 ) -> Dict[str, Any]:
     """Run the full ingest pipeline.
 
@@ -377,7 +396,7 @@ def ingest(
     mapping = mapping or {}
 
     # 1. Read input
-    raw_rows = read_input_file(input_path)
+    raw_rows, provenance = read_input_file(input_path)
     if limit is not None and limit > 0:
         raw_rows = raw_rows[:limit]
     row_count_in = len(raw_rows)
@@ -388,12 +407,18 @@ def ingest(
     # 2. Apply column mapping
     mapped_rows = apply_mapping(raw_rows, mapping)
 
+    # 2b. Flatten nested fields and expand chat turns
+    mapped_rows = flatten_rows(
+        mapped_rows, expand_chat=expand_chat, separator=flatten_sep,
+    )
+
     # 3. Detect or validate schema
     if schema == "auto":
         schema = detect_schema(mapped_rows)
 
-    if schema not in SCHEMA_REQUIRED:
-        raise ValueError(f"Unknown schema '{schema}'. Expected: sft, classification.")
+    if schema not in SCHEMA_REGISTRY:
+        known = ", ".join(schema_names())
+        raise ValueError(f"Unknown schema '{schema}'. Expected one of: {known}.")
 
     # 4. Validate and canonicalize
     canonical: List[Dict[str, Any]] = []
@@ -442,6 +467,8 @@ def ingest(
         row_count_in=row_count_in,
         dropped=dropped,
         extra_tags=extra_tags,
+        input_provenance=provenance,
+        input_format=provenance.get("format", ""),
     )
 
     # Read back dataset hash
@@ -479,6 +506,8 @@ def run(
     strict: bool = False,
     dry_run: bool = False,
     verbose: bool = False,
+    expand_chat: bool = True,
+    flatten_sep: str = ".",
 ) -> Dict[str, Any]:
     """CLI entry point for verifily ingest."""
     mapping = parse_map_args(map_args)
@@ -494,6 +523,8 @@ def run(
         limit=limit,
         strict=strict,
         dry_run=dry_run,
+        expand_chat=expand_chat,
+        flatten_sep=flatten_sep,
     )
 
     # Display results
