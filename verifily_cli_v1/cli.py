@@ -479,6 +479,18 @@ def pipeline(
         None, "--output", "-o", help="Directory to write pipeline artifacts."
     ),
     verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
+    wandb: Optional[bool] = typer.Option(
+        None, "--wandb/--no-wandb", help="Log results to Weights & Biases (overrides config)."
+    ),
+    wandb_project: Optional[str] = typer.Option(
+        None, "--wandb-project", help="W&B project name (default: verifily)."
+    ),
+    mlflow: Optional[bool] = typer.Option(
+        None, "--mlflow/--no-mlflow", help="Log results to MLflow (overrides config)."
+    ),
+    mlflow_experiment: Optional[str] = typer.Option(
+        None, "--mlflow-experiment", help="MLflow experiment name (default: verifily)."
+    ),
 ) -> None:
     """Run end-to-end pipeline: contract → report → contamination → decision.
 
@@ -487,6 +499,8 @@ def pipeline(
     Example:
       verifily pipeline --config verifily.yaml
       verifily pipeline --config verifily.yaml --ci
+      verifily pipeline --config verifily.yaml --wandb --wandb-project my-project
+      verifily pipeline --config verifily.yaml --mlflow
     """
     def _impl():
         config_path = Path(config)
@@ -495,9 +509,24 @@ def pipeline(
             console.print("[dim]Hint:[/dim] Run [bold]verifily quickstart <path>[/bold] to scaffold a project,")
             console.print("      or specify a valid config with [bold]--config <path>[/bold].")
             raise SystemExit(EXIT_TOOL_ERROR)
+
+        # Apply CLI integration overrides to config before running
+        _integration_overrides = {}
+        if wandb is not None:
+            _integration_overrides.setdefault("wandb", {})["enabled"] = wandb
+        if wandb_project is not None:
+            _integration_overrides.setdefault("wandb", {})["project"] = wandb_project
+        if mlflow is not None:
+            _integration_overrides.setdefault("mlflow", {})["enabled"] = mlflow
+        if mlflow_experiment is not None:
+            _integration_overrides.setdefault("mlflow", {})["experiment_name"] = mlflow_experiment
+
         try:
             from verifily_cli_v1.commands.pipeline import run
-            result = run(config=config, ci=ci, output=output, verbose=verbose)
+            result = run(
+                config=config, ci=ci, output=output, verbose=verbose,
+                integration_overrides=_integration_overrides if _integration_overrides else None,
+            )
             exit_code = result.get("decision", {}).get("exit_code", EXIT_TOOL_ERROR)
             raise SystemExit(exit_code)
         except SystemExit:
@@ -583,7 +612,7 @@ def contract_check(
 @app.command()
 def ingest(
     input_path: str = typer.Option(
-        ..., "--in", help="Input CSV, JSONL, or Parquet file."
+        ..., "--in", help="Input CSV, JSONL, Parquet file, or HuggingFace URI (hf://dataset-name)."
     ),
     output_path: str = typer.Option(
         ..., "--out", help="Output dataset artifact directory."

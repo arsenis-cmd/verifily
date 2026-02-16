@@ -275,15 +275,39 @@ class ParquetReader(DatasetReader):
 _READERS: List[DatasetReader] = [CsvReader(), JsonlReader(), ParquetReader()]
 
 
+def _get_hf_reader() -> Optional[DatasetReader]:
+    """Lazy-load HuggingFaceReader to avoid circular imports."""
+    try:
+        from verifily_cli_v1.integrations.huggingface import HuggingFaceReader
+        return HuggingFaceReader()
+    except Exception:
+        return None
+
+
 def get_reader(path: Union[str, Path]) -> DatasetReader:
-    """Return the appropriate reader for a file path based on extension."""
+    """Return the appropriate reader for a file path or URI.
+
+    Checks URI schemes (hf://) before file extensions.
+    """
+    path_str = str(path)
+
+    # Check hf:// URIs first (lazy import to avoid circular deps)
+    if path_str.startswith("hf://") or path_str.startswith("hf:/"):
+        hf_reader = _get_hf_reader()
+        if hf_reader is not None:
+            return hf_reader
+        raise ValueError(
+            "HuggingFace URI detected but integrations not available. "
+            "Install with: pip install verifily[huggingface]"
+        )
+
     p = Path(path)
     for reader in _READERS:
         if reader.can_read(p):
             return reader
     raise ValueError(
         f"Unsupported file extension '{p.suffix}'. "
-        f"Supported: .csv, .tsv, .jsonl, .jsonlines, .parquet, .pq"
+        f"Supported: .csv, .tsv, .jsonl, .jsonlines, .parquet, .pq, hf:// URIs"
     )
 
 

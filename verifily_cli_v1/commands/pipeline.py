@@ -237,6 +237,53 @@ def make_decision(
     }
 
 
+# ── Integration logging ────────────────────────────────────────
+
+def _log_integrations(
+    results: Dict[str, Any],
+    cfg: Dict[str, Any],
+    *,
+    ci: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Log pipeline results to enabled integrations (W&B, MLflow).
+
+    Reads ``wandb:`` and ``mlflow:`` sections from the pipeline config.
+    Failures never block the pipeline.
+    """
+    # W&B
+    wandb_cfg = cfg.get("wandb", {})
+    if isinstance(wandb_cfg, dict) and wandb_cfg.get("enabled"):
+        try:
+            from verifily_cli_v1.integrations.wandb import (
+                log_pipeline_run,
+                wandb_config_from_dict,
+            )
+            wc = wandb_config_from_dict(wandb_cfg)
+            url = log_pipeline_run(results, wc)
+            if url and not ci:
+                console.print(f"  W&B: {url}")
+        except Exception as e:
+            if verbose:
+                console.print(f"[dim]W&B logging skipped: {e}[/dim]")
+
+    # MLflow
+    mlflow_cfg = cfg.get("mlflow", {})
+    if isinstance(mlflow_cfg, dict) and mlflow_cfg.get("enabled"):
+        try:
+            from verifily_cli_v1.integrations.mlflow import (
+                log_pipeline_run,
+                mlflow_config_from_dict,
+            )
+            mc = mlflow_config_from_dict(mlflow_cfg)
+            run_id = log_pipeline_run(results, mc)
+            if run_id and not ci:
+                console.print(f"  MLflow run: {run_id}")
+        except Exception as e:
+            if verbose:
+                console.print(f"[dim]MLflow logging skipped: {e}[/dim]")
+
+
 # ── Pipeline orchestrator ───────────────────────────────────────
 
 def run_pipeline(
@@ -248,6 +295,7 @@ def run_pipeline(
     request_id: str | None = None,
     mode: str = "cli",
     project_id: str | None = None,
+    integration_overrides: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Run the full Verifily pipeline from a config file.
 
@@ -273,6 +321,12 @@ def run_pipeline(
     meter = UsageMeter(run_id=run_id, request_id=request_id, mode=mode, ci=ci, project_id=project_id)
 
     cfg = read_yaml(config_path)
+
+    # Merge CLI integration overrides (--wandb, --mlflow flags)
+    if integration_overrides:
+        for section, overrides in integration_overrides.items():
+            cfg.setdefault(section, {}).update(overrides)
+
     config_dir = Path(config_path).parent
 
     # Resolve paths relative to config file
@@ -464,6 +518,9 @@ def run_pipeline(
     meter.finalize(total_elapsed_ms=total_ms)
     results["usage"] = meter.to_dict()
 
+    # ── Integration logging (opt-in) ─────────────────────────
+    _log_integrations(results, cfg, ci=ci, verbose=verbose)
+
     _print_decision(decision, ci=ci)
 
     if output_dir:
@@ -601,10 +658,12 @@ def run(
     request_id: str | None = None,
     mode: str = "cli",
     project_id: str | None = None,
+    integration_overrides: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Run the pipeline and return results."""
     result = run_pipeline(
         config, ci=ci, output_dir=output, verbose=verbose,
         request_id=request_id, mode=mode, project_id=project_id,
+        integration_overrides=integration_overrides,
     )
     return result

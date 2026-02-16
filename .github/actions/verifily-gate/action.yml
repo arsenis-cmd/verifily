@@ -16,7 +16,7 @@ inputs:
   base-url:
     description: 'Verifily server URL'
     required: false
-    default: 'http://localhost:8080'
+    default: 'http://localhost:8000'
   
   api-key:
     description: 'API key for authentication'
@@ -43,6 +43,11 @@ inputs:
     required: false
     default: 'latest'
 
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11'
+
 outputs:
   decision:
     description: 'Gate decision (PASS, FAIL, or SKIP)'
@@ -65,9 +70,9 @@ runs:
         # Install Verifily CLI
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
-          pip install verifily
+          pip install git+https://github.com/arsenis-cmd/verifily.git#egg=verifily
         else
-          pip install verifily==$VERSION
+          pip install git+https://github.com/arsenis-cmd/verifily.git@v$VERSION#egg=verifily
         fi
         verifily --version
 
@@ -79,7 +84,7 @@ runs:
         verifily server --daemon
         # Wait for server to be ready
         for i in {1..30}; do
-          if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+          if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
             echo "Server is ready"
             break
           fi
