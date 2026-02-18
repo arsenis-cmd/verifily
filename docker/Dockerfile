@@ -7,8 +7,8 @@ COPY pyproject.toml VERSION README.md /build/
 COPY verifily_cli_v1/ /build/verifily_cli_v1/
 COPY verifily_sdk/ /build/verifily_sdk/
 
-RUN pip install --no-cache-dir -e ".[all]" && \
-    pip install --no-cache-dir -e verifily_sdk/
+RUN pip install --no-cache-dir ".[all]" && \
+    pip install --no-cache-dir verifily_sdk/
 
 # ── Stage 2: runtime ────────────────────────────────────────────
 FROM python:3.11-slim
@@ -47,4 +47,4 @@ USER verifily
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:8080/health >/dev/null || exit 1
 
-CMD ["verifily", "serve", "--host", "0.0.0.0", "--port", "8080", "--allow-nonlocal"]
+CMD ["sh", "-c", "verifily serve --host 0.0.0.0 --port ${PORT:-8080} --allow-nonlocal"]

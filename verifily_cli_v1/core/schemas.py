@@ -162,11 +162,27 @@ _register(SchemaDefinition(
     content_fields=("prompt", "chosen", "rejected"),
 ))
 
+_register(SchemaDefinition(
+    name="nl2sql",
+    required_groups=(("question", "sql", "schema"), ("question", "sql", "schema_ref")),
+    optional=("tags", "id", "db_id", "metadata"),
+    alternates=({"natural_language": "question", "query": "sql"},),
+    detection_signatures=(
+        frozenset({"question", "sql", "schema"}),
+        frozenset({"question", "sql", "schema_ref"}),
+        frozenset({"question", "sql", "db_id"}),
+    ),
+    canonical_fields=("question", "sql", "schema", "schema_ref", "db_id"),
+    text_fields=("question", "sql"),
+    content_fields=("question", "sql", "natural_language", "query"),
+))
+
 
 # ── Detection priority ────────────────────────────────────────────
 # More specific schemas checked first to avoid misclassification.
 _DETECTION_ORDER = [
     "rm_pairwise",
+    "nl2sql",
     "qa",
     "chat",
     "summarization",

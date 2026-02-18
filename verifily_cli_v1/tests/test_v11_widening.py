@@ -99,7 +99,7 @@ class TestSchemas:
     def test_all_schemas_registered(self):
         from verifily_cli_v1.core.schemas import SCHEMA_REGISTRY
 
-        expected = {"sft", "qa", "classification", "chat", "summarization", "translation", "rm_pairwise"}
+        expected = {"sft", "qa", "classification", "chat", "summarization", "translation", "rm_pairwise", "nl2sql"}
         assert set(SCHEMA_REGISTRY.keys()) == expected
 
     def test_detect_schema_from_fields(self):

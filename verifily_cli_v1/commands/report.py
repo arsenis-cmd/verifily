@@ -72,6 +72,10 @@ def dataset_report(
     pii_clean = pii_result["pii_clean"]
     total_pii = pii_result["pii_total_hits"]
 
+    # Quality analysis
+    from verifily_cli_v1.core.quality import analyze_quality
+    quality = analyze_quality(rows, schema=schema)
+
     return {
         "path": str(dataset_path),
         "row_count": row_count,
@@ -81,6 +85,7 @@ def dataset_report(
         "pii_scan": pii_results,
         "pii_total_hits": total_pii,
         "pii_clean": pii_clean,
+        "quality": quality.to_dict(),
     }
 
 
@@ -132,6 +137,19 @@ def run(
         for pii_type, data in report["pii_scan"].items():
             if data["count"] > 0:
                 console.print(f"  {pii_type}: {data['count']} rows")
+
+    # Quality analysis
+    if "quality" in report:
+        q = report["quality"]
+        score = q.get("quality_score", 0)
+        score_style = "green" if score >= 80 else "yellow" if score >= 50 else "red"
+        console.print(f"\n[bold]Quality Score:[/bold] [{score_style}]{score}/100[/{score_style}]")
+        for issue in q.get("issues", []):
+            icon = "!" if issue["severity"] == "warning" else "X" if issue["severity"] == "error" else "*"
+            console.print(f"  {icon} {issue['description']}")
+        stats = q.get("stats", {})
+        if stats.get("type_token_ratio"):
+            console.print(f"  Vocabulary: {stats['unique_tokens']:,} unique / {stats['total_tokens']:,} total (TTR: {stats['type_token_ratio']:.3f})")
 
     console.print()
 

@@ -196,6 +196,27 @@ def canonicalize_row(
         canonical["chosen"] = str(row.get("chosen", "")).strip()
         canonical["rejected"] = str(row.get("rejected", "")).strip()
 
+    elif schema == "nl2sql":
+        canonical["question"] = str(row.get("question", "")).strip()
+        canonical["sql"] = str(row.get("sql", "")).strip()
+        schema_val = row.get("schema")
+        if isinstance(schema_val, str):
+            try:
+                schema_val = json.loads(schema_val)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if isinstance(schema_val, dict):
+            canonical["schema"] = schema_val
+        schema_ref = row.get("schema_ref", "")
+        if isinstance(schema_ref, str) and schema_ref.strip():
+            canonical["schema_ref"] = schema_ref.strip()
+        db_id = row.get("db_id", "")
+        if isinstance(db_id, str) and db_id.strip():
+            canonical["db_id"] = db_id.strip()
+        metadata = row.get("metadata")
+        if isinstance(metadata, dict):
+            canonical["metadata"] = metadata
+
     # Tags: merge extra_tags (don't override existing keys)
     existing_tags = row.get("tags", {})
     if isinstance(existing_tags, str):

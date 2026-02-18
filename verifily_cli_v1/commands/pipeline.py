@@ -170,6 +170,14 @@ def make_decision(
             if k in baseline_metrics:
                 deltas[k] = round(metrics[k] - baseline_metrics[k], 6)
 
+    # Quality gate (optional)
+    min_quality = ship_criteria.get("min_quality_score")
+    if min_quality is not None and report_result:
+        q_score = report_result.get("quality", {}).get("quality_score")
+        if q_score is not None and q_score < min_quality:
+            blockers.append(f"Quality score ({q_score}) below threshold ({min_quality})")
+            risk_flags.append("quality_below_threshold")
+
     # 5. Eval missing (when thresholds require metrics)
     min_f1 = ship_criteria.get("min_f1")
     min_exact_match = ship_criteria.get("min_exact_match")

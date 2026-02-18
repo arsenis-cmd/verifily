@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -13,6 +15,22 @@ from rich.console import Console
 from verifily_cli_v1 import __version__
 
 console = Console(stderr=True)
+
+
+# ── License gating ────────────────────────────────────────────
+def _require_license(command_name: str) -> None:
+    """Check license for a paid command.  Raises SystemExit on failure."""
+    from verifily_cli_v1.core.licensing import check_license, LicenseError, Tier
+    try:
+        info = check_license(command_name)
+        if info.is_trial:
+            console.print(
+                f"[dim]Trial active — {info.days_remaining} days remaining.  "
+                f"Upgrade at https://verifily.io/pricing[/dim]"
+            )
+    except LicenseError as exc:
+        console.print(f"\n[red bold]License required[/red bold]\n\n{exc}")
+        raise SystemExit(1)
 
 app = typer.Typer(
     name="verifily",
@@ -43,6 +61,17 @@ app = typer.Typer(
 )
 
 
+# ── Sub-app groups (keep top-level --help clean) ─────────────
+admin_app = typer.Typer(help="Admin commands: API keys, projects, teams, RBAC.")
+billing_app = typer.Typer(help="Billing: events, invoices, plans, usage, checkout.")
+monitor_app = typer.Typer(help="Continuous monitoring: start, stop, status, history.")
+ws_app = typer.Typer(help="Workspaces: orgs, projects, keys.")
+app.add_typer(admin_app, name="admin")
+app.add_typer(billing_app, name="billing")
+app.add_typer(monitor_app, name="monitor")
+app.add_typer(ws_app, name="ws")
+
+
 def _version_callback(value: bool) -> None:
     if value:
         from rich.panel import Panel
@@ -51,15 +80,18 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False, "--version", "-v", help="Show version and exit.",
         callback=_version_callback, is_eager=True,
     ),
 ) -> None:
     """Verifily — ML data quality gate."""
-    pass
+    cmd = ctx.invoked_subcommand
+    if cmd is not None:
+        _require_license(cmd)
 
 
 # ── init ─────────────────────────────────────────────────────────
@@ -200,7 +232,7 @@ def _doctor_deploy_impl(verbose: bool) -> int:
 
 # ── transform ────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def transform(
     input_path: str = typer.Option(
         ..., "--in", help="Raw input dataset file or directory."
@@ -254,7 +286,7 @@ def _transform_impl(
 
 # ── train ────────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def train(
     config: str = typer.Option(
         ..., "--config", "-c", help="Path to train.yaml config file."
@@ -287,7 +319,16 @@ def _train_impl(config: str, run_dir: Optional[str], plan: bool, verbose: bool) 
 @app.command(name="eval")
 def eval_cmd(
     run_dir: str = typer.Option(
-        ..., "--run", help="Path to the run directory to evaluate."
+        None, "--run", help="Path to the run directory to evaluate."
+    ),
+    predictions: Optional[str] = typer.Option(
+        None, "--predictions", help="JSONL file with predictions (for --compute mode)."
+    ),
+    references: Optional[str] = typer.Option(
+        None, "--references", help="JSONL file with references (for --compute mode)."
+    ),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Write eval_results.json to this path."
     ),
     slice_by: Optional[str] = typer.Option(
         None, "--slice-by", help="Optional tag key for sliced metrics."
@@ -296,24 +337,69 @@ def eval_cmd(
 ) -> None:
     """Evaluate a training run and display metrics.
 
+    Two modes:
+      1. Display pre-computed results: verifily eval --run runs/my_run
+      2. Compute metrics from files: verifily eval --predictions preds.jsonl --references refs.jsonl
+
     Example:
       verifily eval --run runs/my_run
-      verifily eval --run runs/my_run --slice-by source --verbose
+      verifily eval --predictions preds.jsonl --references refs.jsonl -o eval_results.json
     """
     _run_safe(
-        lambda: _eval_impl(run_dir, slice_by, verbose),
+        lambda: _eval_impl(run_dir, predictions, references, output, slice_by, verbose),
         verbose=verbose,
     )
 
 
-def _eval_impl(run_dir: str, slice_by: Optional[str], verbose: bool) -> None:
-    from verifily_cli_v1.commands.eval import run
-    run(run_dir=run_dir, slice_by=slice_by, verbose=verbose)
+def _eval_impl(
+    run_dir: Optional[str],
+    predictions: Optional[str],
+    references: Optional[str],
+    output: Optional[str],
+    slice_by: Optional[str],
+    verbose: bool,
+) -> None:
+    if predictions and references:
+        # Compute mode: calculate real metrics
+        from verifily_cli_v1.core.io import read_jsonl
+        from verifily_cli_v1.core.eval_metrics import compute_metrics
+        from rich.table import Table
+        from rich.panel import Panel
+
+        pred_rows = read_jsonl(predictions)
+        ref_rows = read_jsonl(references)
+
+        pred_texts = [str(r.get("output", r.get("text", ""))).strip() for r in pred_rows]
+        ref_texts = [str(r.get("output", r.get("text", ""))).strip() for r in ref_rows]
+
+        result = compute_metrics(pred_texts, ref_texts, include_per_example=verbose)
+
+        tbl = Table(title="Evaluation Metrics", show_header=True)
+        tbl.add_column("Metric", style="cyan")
+        tbl.add_column("Value", justify="right")
+        tbl.add_row("Exact Match", f"{result.exact_match:.4f}")
+        tbl.add_row("Token F1", f"{result.f1:.4f}")
+        tbl.add_row("BLEU", f"{result.bleu:.4f}")
+        tbl.add_row("ROUGE-L", f"{result.rouge_l:.4f}")
+        tbl.add_row("Length Ratio", f"{result.length_ratio:.4f}")
+        tbl.add_row("Examples", str(result.num_examples))
+        console.print(tbl)
+
+        if output:
+            from verifily_cli_v1.core.io import write_json
+            write_json(output, result.to_dict())
+            console.print(f"\nResults written to: {output}")
+    elif run_dir:
+        from verifily_cli_v1.commands.eval import run
+        run(run_dir=run_dir, slice_by=slice_by, verbose=verbose)
+    else:
+        console.print("[red]Provide --run or both --predictions and --references[/red]")
+        raise SystemExit(1)
 
 
 # ── compare ──────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def compare(
     runs: str = typer.Option(
         ..., "--runs", help="Comma-separated list of run directories."
@@ -341,7 +427,7 @@ def _compare_impl(runs: str, metric: str, verbose: bool) -> None:
 
 # ── reproduce ────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def reproduce(
     run_dir: str = typer.Option(
         ..., "--run", help="Path to the run directory to verify."
@@ -383,19 +469,41 @@ def report(
     pii_confidence: float = typer.Option(
         0.0, "--pii-confidence", help="Minimum confidence threshold for PII matches."
     ),
+    server: Optional[str] = typer.Option(
+        None, "--server", help="Run via remote API server."
+    ),
+    server_api_key: Optional[str] = typer.Option(
+        None, "--api-key", help="API key for remote server auth."
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
 ) -> None:
     """Generate a dataset report with field statistics and PII scan.
 
+    Use --server to run via a remote API instead of locally.
+
     Example:
       verifily report --dataset data/train.jsonl
       verifily report --dataset data/train.jsonl --ner
-      verifily report --dataset data/train.jsonl --output report.json
+      verifily report --dataset data/train.jsonl --server https://api.verifily.io
     """
-    _run_safe(
-        lambda: _report_impl(dataset, schema, output, verbose, use_ner, pii_confidence),
-        verbose=verbose,
-    )
+    def _impl():
+        from verifily_cli_v1.core.remote import get_api_url
+        remote_url = get_api_url(server)
+        if remote_url:
+            from verifily_cli_v1.core.remote import remote_report
+            console.print(f"[dim]Running via remote server: {remote_url}[/dim]")
+            result = remote_report(
+                server=remote_url,
+                api_key=server_api_key or os.environ.get("VERIFILY_API_KEY", ""),
+                dataset_path=dataset,
+                schema=schema,
+            )
+            import json as _json
+            console.print(_json.dumps(result, indent=2))
+            return
+        _report_impl(dataset, schema, output, verbose, use_ner, pii_confidence)
+
+    _run_safe(_impl, verbose=verbose)
 
 
 def _report_impl(
@@ -441,6 +549,12 @@ def contamination(
     output: Optional[str] = typer.Option(
         None, "--output", "-o", help="Write JSON results to file."
     ),
+    server: Optional[str] = typer.Option(
+        None, "--server", help="Run via remote API server (e.g. https://api.verifily.io)."
+    ),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key", help="API key for remote server auth."
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
 ) -> None:
     """Detect train/eval contamination via exact and near-duplicate matching.
@@ -448,13 +562,35 @@ def contamination(
     Uses MinHash LSH by default for scalable O(N) near-duplicate detection.
     Use --no-lsh to fall back to brute-force O(N^2) comparison.
 
+    Use --server to run via a remote API instead of locally.
+
     Exit codes: 0=PASS, 1=FAIL (exact leaks), 2=WARN (near-duplicates).
 
     Example:
       verifily contamination --train data/train.jsonl --eval data/eval.jsonl
       verifily contamination --train train.jsonl --eval eval.jsonl --num-perm 128
+      verifily contamination --train train.jsonl --eval eval.jsonl --server https://api.verifily.io
     """
     def _impl():
+        from verifily_cli_v1.core.remote import get_api_url
+        remote_url = get_api_url(server)
+
+        if remote_url:
+            from verifily_cli_v1.core.remote import remote_contamination
+            console.print(f"[dim]Running via remote server: {remote_url}[/dim]")
+            result = remote_contamination(
+                server=remote_url,
+                api_key=api_key or os.environ.get("VERIFILY_API_KEY", ""),
+                train_path=train,
+                eval_path=eval_set,
+                jaccard_cutoff=jaccard_cutoff,
+            )
+            if output:
+                Path(output).write_text(json.dumps(result, indent=2))
+            import json as _json
+            console.print(_json.dumps(result, indent=2))
+            raise SystemExit(result.get("exit_code", 0))
+
         from verifily_cli_v1.commands.contamination import run
         result = run(train=train, eval_set=eval_set, jaccard_cutoff=jaccard_cutoff,
                      output=output, verbose=verbose, num_perm=num_perm,
@@ -491,18 +627,46 @@ def pipeline(
     mlflow_experiment: Optional[str] = typer.Option(
         None, "--mlflow-experiment", help="MLflow experiment name (default: verifily)."
     ),
+    server: Optional[str] = typer.Option(
+        None, "--server", help="Run via remote API server (e.g. https://api.verifily.io)."
+    ),
+    server_api_key: Optional[str] = typer.Option(
+        None, "--api-key", help="API key for remote server auth."
+    ),
 ) -> None:
     """Run end-to-end pipeline: contract → report → contamination → decision.
 
     Exit codes: 0=SHIP, 1=DONT_SHIP, 2=INVESTIGATE, 3=CONTRACT_FAIL, 4=TOOL_ERROR.
 
+    Use --server to run via a remote API instead of locally.
+
     Example:
       verifily pipeline --config verifily.yaml
       verifily pipeline --config verifily.yaml --ci
       verifily pipeline --config verifily.yaml --wandb --wandb-project my-project
-      verifily pipeline --config verifily.yaml --mlflow
+      verifily pipeline --config verifily.yaml --server https://api.verifily.io
     """
     def _impl():
+        from verifily_cli_v1.core.remote import get_api_url
+        remote_url = get_api_url(server)
+
+        if remote_url:
+            from verifily_cli_v1.core.remote import remote_pipeline
+            console.print(f"[dim]Running via remote server: {remote_url}[/dim]")
+            result = remote_pipeline(
+                server=remote_url,
+                api_key=server_api_key or os.environ.get("VERIFILY_API_KEY", ""),
+                config_path=config,
+                ci=ci,
+            )
+            import json as _json
+            if ci:
+                print(_json.dumps(result, indent=2))
+            else:
+                console.print(_json.dumps(result, indent=2))
+            exit_code = result.get("decision", {}).get("exit_code", EXIT_TOOL_ERROR)
+            raise SystemExit(exit_code)
+
         config_path = Path(config)
         if not config_path.exists():
             console.print(f"[red bold]Error:[/red bold] Config not found: {config_path}")
@@ -545,7 +709,7 @@ def pipeline(
 
 # ── history ─────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def history(
     runs_dir: str = typer.Option(
         ..., "--runs", help="Directory containing run subdirectories."
@@ -811,7 +975,7 @@ def _serve_impl(
 
 # ── usage ──────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def usage(
     server: str = typer.Option(
         "http://127.0.0.1:8000", "--server", "-s",
@@ -907,7 +1071,7 @@ def _usage_impl(
 
 # ── retrain ──────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def retrain(
     dataset: str = typer.Option(
         ..., "--dataset", "-d", help="Path to dataset artifact directory."
@@ -976,7 +1140,7 @@ def _retrain_impl(
 
 # ── monitor-start ────────────────────────────────────────────────
 
-@app.command(name="monitor-start")
+@monitor_app.command(name="start")
 def monitor_start(
     config: str = typer.Option(
         ..., "--config", "-c", help="Path to verifily.yaml pipeline config."
@@ -1027,7 +1191,7 @@ def _monitor_start_impl(
 
 # ── monitor-stop ─────────────────────────────────────────────────
 
-@app.command(name="monitor-stop")
+@monitor_app.command(name="stop")
 def monitor_stop(
     monitor_id: str = typer.Option(
         ..., "--monitor-id", "-m", help="Monitor ID to stop."
@@ -1059,7 +1223,7 @@ def _monitor_stop_impl(monitor_id: str, server: str, api_key: Optional[str]) -> 
 
 # ── monitor-status ───────────────────────────────────────────────
 
-@app.command(name="monitor-status")
+@monitor_app.command(name="status")
 def monitor_status(
     monitor_id: str = typer.Option(
         ..., "--monitor-id", "-m", help="Monitor ID."
@@ -1104,7 +1268,7 @@ def _monitor_status_impl(
 
 # ── monitor-history ──────────────────────────────────────────────
 
-@app.command(name="monitor-history")
+@monitor_app.command(name="history")
 def monitor_history(
     monitor_id: str = typer.Option(
         ..., "--monitor-id", "-m", help="Monitor ID."
@@ -1207,6 +1371,157 @@ def _quickstart_impl(path: str, force: bool, json_output: bool) -> None:
     for i, step in enumerate(result["next_steps"], 1):
         lines.append(f"  {i}. [cyan]{step}[/cyan]")
     console.print(Panel("\n".join(lines), title="Verifily Quickstart", border_style="blue"))
+
+
+# ── check ─────────────────────────────────────────────────────────
+
+@app.command()
+def check(
+    file: str = typer.Argument(..., help="Path to CSV, JSONL, or Parquet file."),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", "-s", help="Override auto-detected schema."
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON."),
+) -> None:
+    """Quick quality check on any dataset file.
+
+    Auto-detects schema, scans for PII, checks for duplicates and empty fields.
+
+    Example:
+      verifily check data.csv
+      verifily check train.jsonl
+      verifily check data.parquet --schema sft
+    """
+    _run_safe(lambda: _check_impl(file, schema, json_output))
+
+
+def _check_impl(file: str, schema_override: Optional[str], json_output: bool) -> None:
+    import csv
+    import hashlib
+    from rich.table import Table
+    from rich.panel import Panel
+
+    p = Path(file)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: {file}")
+
+    # Read rows
+    suffix = p.suffix.lower()
+    rows = []
+    if suffix == ".jsonl":
+        from verifily_cli_v1.core.io import read_jsonl
+        rows = read_jsonl(p)
+    elif suffix == ".csv":
+        with open(p, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    elif suffix in (".parquet", ".pq"):
+        try:
+            import pyarrow.parquet as pq
+            table = pq.read_table(str(p))
+            rows = table.to_pydict()
+            keys = list(rows.keys())
+            rows = [dict(zip(keys, vals)) for vals in zip(*rows.values())]
+        except ImportError:
+            raise RuntimeError("pip install pyarrow to read Parquet files.")
+    else:
+        raise ValueError(f"Unsupported file type: {suffix}")
+
+    if not rows:
+        console.print("[red]File is empty.[/red]")
+        raise SystemExit(1)
+
+    # Schema detection
+    fields = set(rows[0].keys())
+    detected = schema_override
+    if not detected:
+        try:
+            from verifily_cli_v1.core.schemas import detect_schema_from_fields
+            detected = detect_schema_from_fields(fields)
+        except ValueError:
+            detected = "unknown"
+
+    # Empty fields
+    total_cells = len(rows) * len(fields)
+    empty_count = sum(
+        1 for row in rows for v in row.values()
+        if v is None or (isinstance(v, str) and v.strip() == "")
+    )
+
+    # Duplicates (hash text content)
+    seen = set()
+    dup_count = 0
+    for row in rows:
+        h = hashlib.md5(json.dumps(row, sort_keys=True, default=str).encode()).hexdigest()
+        if h in seen:
+            dup_count += 1
+        seen.add(h)
+
+    # PII scan
+    from verifily_cli_v1.core.pii import scan_dataset
+    pii_result = scan_dataset(rows)
+    pii_hits = pii_result.get("pii_total_hits", 0)
+
+    # Quality analysis
+    from verifily_cli_v1.core.quality import analyze_quality
+    quality = analyze_quality(rows)
+    near_dup_count = quality.stats.get("near_duplicate_count", 0)
+
+    # Status
+    issues = []
+    if pii_hits > 0:
+        issues.append(f"{pii_hits} PII hits")
+    if dup_count > 0:
+        issues.append(f"{dup_count} exact duplicates")
+    if near_dup_count > 0:
+        issues.append(f"{near_dup_count} near-duplicates")
+    if empty_count > total_cells * 0.1:
+        issues.append(f"{empty_count} empty fields ({empty_count*100//total_cells}%)")
+    if quality.quality_score < 50:
+        issues.append(f"quality score {quality.quality_score}/100")
+
+    status = "PASS" if not issues else "WARN"
+    status_style = "green bold" if status == "PASS" else "yellow bold"
+
+    if json_output:
+        out = {
+            "file": str(p),
+            "rows": len(rows),
+            "fields": sorted(fields),
+            "schema": detected,
+            "quality_score": quality.quality_score,
+            "empty_fields": empty_count,
+            "duplicates": dup_count,
+            "near_duplicates": near_dup_count,
+            "pii_hits": pii_hits,
+            "status": status,
+            "quality": quality.to_dict(),
+        }
+        Console().print_json(json.dumps(out))
+        return
+
+    tbl = Table(show_header=False, box=None, padding=(0, 2))
+    tbl.add_column(style="bold")
+    tbl.add_column()
+    tbl.add_row("File", p.name)
+    tbl.add_row("Rows", f"{len(rows):,}")
+    tbl.add_row("Fields", ", ".join(sorted(fields)))
+    tbl.add_row("Schema", detected or "unknown")
+    score_style = "green" if quality.quality_score >= 80 else "yellow" if quality.quality_score >= 50 else "red"
+    tbl.add_row("Quality score", f"[{score_style}]{quality.quality_score}/100[/{score_style}]")
+    tbl.add_row("Empty fields", f"{empty_count:,}" + (f" ({empty_count*100//total_cells}%)" if total_cells else ""))
+    tbl.add_row("Duplicates", f"{dup_count:,}" + (f" ({dup_count*100//len(rows):.1f}%)" if rows else ""))
+    if near_dup_count > 0:
+        tbl.add_row("Near-duplicates", f"{near_dup_count:,}" + f" ({near_dup_count*100//len(rows):.0f}%)")
+    tbl.add_row("PII detected", str(pii_hits))
+    tbl.add_row("Status", f"[{status_style}]{status}[/{status_style}]")
+
+    c = Console()
+    c.print(Panel(tbl, title="Verifily Check", border_style="blue"))
+
+    # Print quality issues
+    for qi in quality.issues:
+        icon = "!" if qi.severity == "warning" else "X" if qi.severity == "error" else "*"
+        c.print(f"  {icon} {qi.description}")
 
 
 # ── ci-init ──────────────────────────────────────────────────────
@@ -1361,7 +1676,7 @@ def _diff_datasets_impl(
 
 # ── org-create ──────────────────────────────────────────────────
 
-@app.command(name="org-create")
+@app.command(name="org-create", hidden=True)
 def org_create(
     name: str = typer.Option(
         ..., "--name", "-n", help="Organization name."
@@ -1400,7 +1715,7 @@ def _org_create_impl(name: str, server: str, api_key: Optional[str], json_output
 
 # ── org-list ────────────────────────────────────────────────────
 
-@app.command(name="org-list")
+@app.command(name="org-list", hidden=True)
 def org_list(
     server: str = typer.Option(
         "http://127.0.0.1:8000", "--server", "-s", help="Verifily API server URL."
@@ -1441,7 +1756,7 @@ def _org_list_impl(server: str, api_key: Optional[str], json_output: bool) -> No
 
 # ── project-create ──────────────────────────────────────────────
 
-@app.command(name="project-create")
+@app.command(name="project-create", hidden=True)
 def project_create(
     org_id: str = typer.Option(
         ..., "--org", help="Organization ID."
@@ -1485,7 +1800,7 @@ def _project_create_impl(
 
 # ── project-list ────────────────────────────────────────────────
 
-@app.command(name="project-list")
+@app.command(name="project-list", hidden=True)
 def project_list(
     org_id: Optional[str] = typer.Option(
         None, "--org", help="Filter by organization ID."
@@ -1533,7 +1848,7 @@ def _project_list_impl(
 # ── security-check ────────────────────────────────────────────────
 
 
-@app.command(name="security-check")
+@app.command(name="security-check", hidden=True)
 def security_check(
     target: str = typer.Argument(".", help="Directory to scan for leaked secrets."),
     verbose: bool = typer.Option(False, "--verbose", help="Show all scanned files."),
@@ -1564,7 +1879,7 @@ def _security_check_impl(target: str, verbose: bool) -> None:
 
 # ── badge ────────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def badge(
     decision: Optional[str] = typer.Option(
         None, "--decision", "-d",
@@ -1618,7 +1933,7 @@ def _badge_impl(
 
 # ── bundle ───────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def bundle(
     run_dir: str = typer.Option(
         ..., "--run", "-r", help="Run or artifact directory to bundle.",
@@ -1696,7 +2011,52 @@ def version() -> None:
 
 # ── billing-events ────────────────────────────────────────────────
 
-@app.command(name="billing-events")
+# ── license management ────────────────────────────────────────
+
+@app.command()
+def login(
+    key: str = typer.Option(
+        ..., "--key", "-k", help="Your Verifily license key (VFY-...)."
+    ),
+) -> None:
+    """Activate a Verifily license key.
+
+    Example:
+      verifily login --key VFY-PRO-a1b2c3d4-20270216-<sig>
+    """
+    def _impl():
+        from verifily_cli_v1.core.licensing import save_license_key
+        info = save_license_key(key)
+        console.print(f"\n[green bold]License activated![/green bold]")
+        console.print(f"  Tier:           {info.tier.value}")
+        console.print(f"  Organization:   {info.org_hash}")
+        console.print(f"  Days remaining: {info.days_remaining}")
+        console.print(f"\n  Saved to ~/.verifily/license.json")
+    _run_safe(_impl)
+
+
+@app.command()
+def account() -> None:
+    """Show current license status."""
+    def _impl():
+        from verifily_cli_v1.core.licensing import license_status
+        from rich.table import Table
+        status = license_status()
+        table = Table(
+            show_header=False, border_style="blue",
+            title="Verifily License", title_style="bold",
+        )
+        table.add_column("Key", style="dim")
+        table.add_column("Value")
+        for k, v in status.items():
+            table.add_row(k, str(v))
+        console.print(table)
+    _run_safe(_impl)
+
+
+# ── billing ──────────────────────────────────────────────────
+
+@billing_app.command(name="events")
 def billing_events(
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Filter by project ID."
@@ -1757,7 +2117,7 @@ def _billing_events_impl(
 
 # ── billing-preview ──────────────────────────────────────────────
 
-@app.command(name="billing-preview")
+@billing_app.command(name="preview")
 def billing_preview(
     project: str = typer.Option(
         "default", "--project", "-p", help="Project ID."
@@ -1824,7 +2184,7 @@ def _billing_preview_impl(
 
 # ── plans ──────────────────────────────────────────────────────────
 
-@app.command(name="plans")
+@billing_app.command(name="plans")
 def billing_plans_cmd(
     server: str = typer.Option(
         "http://127.0.0.1:8000", "--server", "-s", help="Verifily API server URL."
@@ -1876,7 +2236,7 @@ def _plans_impl(server: str, api_key: Optional[str], json_output: bool) -> None:
 
 # ── estimate ──────────────────────────────────────────────────────
 
-@app.command(name="estimate")
+@billing_app.command(name="estimate")
 def billing_estimate_cmd(
     plan: str = typer.Option("FREE", "--plan", help="Plan ID: FREE, STARTER, PRO, ENTERPRISE."),
     window: int = typer.Option(43200, "--window", "-w", help="Window in minutes (default 30 days)."),
@@ -1938,7 +2298,7 @@ def _estimate_impl(
 
 # ── invoice ───────────────────────────────────────────────────────
 
-@app.command(name="invoice")
+@billing_app.command(name="invoice")
 def billing_invoice_cmd(
     plan: str = typer.Option(..., "--plan", help="Plan ID."),
     period_days: int = typer.Option(30, "--period-days", help="Period length in days."),
@@ -2017,7 +2377,7 @@ def _invoice_impl(
 
 # ── usage-export ──────────────────────────────────────────────────
 
-@app.command(name="usage-export")
+@billing_app.command(name="usage-export")
 def billing_usage_export_cmd(
     format: str = typer.Option("csv", "--format", "-f", help="Export format: csv or jsonl."),
     period_days: int = typer.Option(30, "--period-days", help="Period in days."),
@@ -2062,7 +2422,7 @@ def _usage_export_impl(
 
 # ── billing-usage ──────────────────────────────────────────────────
 
-@app.command(name="billing-usage")
+@billing_app.command(name="usage")
 def billing_usage_cmd(
     period: Optional[str] = typer.Option(None, "--period", help="YYYY-MM billing period (default: current)."),
     group_by: str = typer.Option("total", "--group-by", help="Grouping: total, api_key, project."),
@@ -2109,7 +2469,7 @@ def _billing_usage_impl(
 
 # ── checkout ──────────────────────────────────────────────────────
 
-@app.command(name="checkout")
+@billing_app.command(name="checkout")
 def checkout_cmd(
     plan: str = typer.Option("pro", "--plan", help="Plan to subscribe to."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID."),
@@ -2151,7 +2511,7 @@ def _checkout_impl(
 
 # ── subscription ──────────────────────────────────────────────────
 
-@app.command(name="subscription")
+@billing_app.command(name="subscription")
 def subscription_cmd(
     project: str = typer.Option("default", "--project", "-p", help="Project ID."),
     server: str = typer.Option(
@@ -2199,7 +2559,7 @@ def _subscription_impl(
 
 # ── admin-project-create ─────────────────────────────────────────
 
-@app.command(name="admin-project-create")
+@admin_app.command(name="project-create")
 def admin_project_create(
     id: str = typer.Option(..., "--id", help="Project ID."),
     name: str = typer.Option(..., "--name", "-n", help="Project name."),
@@ -2238,7 +2598,7 @@ def _admin_project_create_impl(
 
 # ── admin-key-create ─────────────────────────────────────────────
 
-@app.command(name="admin-key-create")
+@admin_app.command(name="key-create")
 def admin_key_create(
     id: str = typer.Option(..., "--id", help="Key ID."),
     name: str = typer.Option(..., "--name", "-n", help="Key name."),
@@ -2287,7 +2647,7 @@ def _admin_key_create_impl(
 
 # ── admin-key-list ───────────────────────────────────────────────
 
-@app.command(name="admin-key-list")
+@admin_app.command(name="key-list")
 def admin_key_list(
     server: str = typer.Option(
         "http://127.0.0.1:8000", "--server", "-s", help="Verifily API server URL."
@@ -2329,7 +2689,7 @@ def _admin_key_list_impl(server: str, api_key: Optional[str], json_output: bool)
 
 # ── admin-key-disable ────────────────────────────────────────────
 
-@app.command(name="admin-key-disable")
+@admin_app.command(name="key-disable")
 def admin_key_disable(
     key_id: str = typer.Option(..., "--key-id", help="Key ID to disable."),
     server: str = typer.Option(
@@ -2363,7 +2723,7 @@ def _admin_key_disable_impl(key_id: str, server: str, api_key: Optional[str], js
 
 # ── admin-key-rotate ─────────────────────────────────────────────
 
-@app.command(name="admin-key-rotate")
+@admin_app.command(name="key-rotate")
 def admin_key_rotate(
     key_id: str = typer.Option(..., "--key-id", help="Key ID to rotate."),
     raw_key: str = typer.Option(..., "--raw-key", help="New raw API key (min 8 chars)."),
@@ -2398,7 +2758,7 @@ def _admin_key_rotate_impl(key_id: str, raw_key: str, server: str, api_key: Opti
 
 # ── Teams: whoami ────────────────────────────────────────────────
 
-@app.command(name="whoami")
+@admin_app.command(name="whoami")
 def whoami_cmd(
     server: str = typer.Option(
         "http://127.0.0.1:8000", "--server", "-s", help="Verifily API server URL."
@@ -2430,7 +2790,7 @@ def _whoami_impl(server: str, api_key: Optional[str], json_output: bool) -> None
 
 # ── Teams: admin-org-create ─────────────────────────────────────
 
-@app.command(name="admin-org-create")
+@admin_app.command(name="org-create")
 def admin_org_create_cmd(
     id: str = typer.Option(..., "--id", help="Organization ID."),
     name: str = typer.Option(..., "--name", help="Organization name."),
@@ -2461,7 +2821,7 @@ def _admin_org_create_impl(id: str, name: str, server: str, api_key: Optional[st
 
 # ── Teams: admin-user-create ────────────────────────────────────
 
-@app.command(name="admin-user-create")
+@admin_app.command(name="user-create")
 def admin_user_create_cmd(
     id: str = typer.Option(..., "--id", help="User ID."),
     email: str = typer.Option(..., "--email", help="User email."),
@@ -2493,7 +2853,7 @@ def _admin_user_create_impl(id: str, email: str, name: str, server: str, api_key
 
 # ── Teams: admin-member-add ─────────────────────────────────────
 
-@app.command(name="admin-member-add")
+@admin_app.command(name="member-add")
 def admin_member_add_cmd(
     user_id: str = typer.Option(..., "--user-id", help="User ID."),
     org_id: str = typer.Option(..., "--org-id", help="Organization ID."),
@@ -2525,7 +2885,7 @@ def _admin_member_add_impl(user_id: str, org_id: str, role: str, server: str, ap
 
 # ── Teams: admin-team-project-create ────────────────────────────
 
-@app.command(name="admin-team-project-create")
+@admin_app.command(name="team-project-create")
 def admin_team_project_create_cmd(
     id: str = typer.Option(..., "--id", help="Project ID."),
     org_id: str = typer.Option(..., "--org-id", help="Organization ID."),
@@ -2557,7 +2917,7 @@ def _admin_team_project_create_impl(id: str, org_id: str, name: str, server: str
 
 # ── Teams: admin-key-issue ──────────────────────────────────────
 
-@app.command(name="admin-key-issue")
+@admin_app.command(name="key-issue")
 def admin_key_issue_cmd(
     id: str = typer.Option(..., "--id", help="Key ID."),
     org_id: str = typer.Option(..., "--org-id", help="Organization ID."),
@@ -2608,7 +2968,7 @@ def _admin_key_issue_impl(
 
 # ── lineage ─────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def lineage(
     run_dir: str = typer.Option(
         ..., "--run", "-r", help="Path to run directory (e.g., runs/model_v1)."
@@ -2657,7 +3017,7 @@ def _lineage_impl(
 
 # ── score ────────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def score(
     run_dir: str = typer.Option(
         ..., "--run", "-r", help="Path to run directory (e.g., runs/model_v1)."
@@ -2702,7 +3062,7 @@ def _score_impl(
 
 # ── registry ─────────────────────────────────────────────────────
 
-@app.command(name="registry")
+@app.command(name="registry", hidden=True)
 def registry_cmd(
     action: str = typer.Argument(
         ..., help="Action: register, promote, list, history"
@@ -2807,7 +3167,7 @@ def _registry_impl(
 
 # ── budget ───────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def budget(
     action: str = typer.Argument(
         ..., help="Action: status, set-policy"
@@ -3223,7 +3583,7 @@ def _key_list_impl(
 # ── Workspaces ───────────────────────────────────────────────────
 
 
-@app.command(name="ws-org-create")
+@ws_app.command(name="org-create")
 def ws_org_create_cmd(
     name: str = typer.Option(..., "--name", help="Organization name."),
     bootstrap_token: Optional[str] = typer.Option(
@@ -3256,7 +3616,7 @@ def _ws_org_create_impl(
         out.print(f"[bold green]Org created[/bold green]: {resp['org_id']} ({resp['name']})")
 
 
-@app.command(name="ws-project-create")
+@ws_app.command(name="project-create")
 def ws_project_create_cmd(
     org: str = typer.Option(..., "--org", help="Organization ID."),
     name: str = typer.Option(..., "--name", help="Project name."),
@@ -3288,7 +3648,7 @@ def _ws_project_create_impl(
         out.print(f"[bold green]Project created[/bold green]: {resp['project_id']} ({resp['name']})")
 
 
-@app.command(name="ws-key-create")
+@ws_app.command(name="key-create")
 def ws_key_create_cmd(
     project: str = typer.Option(..., "--project", help="Project ID."),
     role: str = typer.Option(..., "--role", help="Role: admin, editor, or viewer."),
@@ -3320,7 +3680,7 @@ def _ws_key_create_impl(
         out.print(f"[bold yellow]API Key (save now, shown once):[/bold yellow] {resp['api_key']}")
 
 
-@app.command(name="ws-key-revoke")
+@ws_app.command(name="key-revoke")
 def ws_key_revoke_cmd(
     project: str = typer.Option(..., "--project", help="Project ID."),
     key_id: str = typer.Option(..., "--key-id", help="API key ID to revoke."),
@@ -3351,7 +3711,7 @@ def _ws_key_revoke_impl(
         out.print(f"[bold green]Key revoked[/bold green]: ok={resp['ok']}")
 
 
-@app.command(name="ws-me")
+@ws_app.command(name="me")
 def ws_me_cmd(
     server: str = typer.Option(
         "http://127.0.0.1:8000", "--server", "-s", help="Verifily API server URL."
@@ -3383,7 +3743,7 @@ def _ws_me_impl(server: str, api_key: Optional[str], json_output: bool) -> None:
 
 # ── backup ───────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def backup(
     output: str = typer.Option(..., "--out", "-o", help="Output path for backup archive (.tar.gz)"),
     include_logs: bool = typer.Option(False, "--include-logs", help="Include log files in backup"),
@@ -3421,7 +3781,7 @@ def _backup_impl(output: str, include_logs: bool, json_output: bool) -> None:
 
 # ── restore ──────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def restore(
     file: str = typer.Option(..., "--file", "-f", help="Backup archive path (.tar.gz)"),
     force: bool = typer.Option(False, "--force", help="Overwrite existing files"),
@@ -3459,7 +3819,7 @@ def _restore_impl(file: str, force: bool, json_output: bool) -> None:
 
 # ── verify-run ───────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def verify_run(
     run: str = typer.Option(..., "--run", "-r", help="Path to run directory"),
     integrity: bool = typer.Option(True, "--integrity/--no-integrity", help="Verify hash chain"),
@@ -3617,7 +3977,7 @@ def _verify_run_impl(
 
 # ── drift ───────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def drift(
     baseline: str = typer.Option(..., "--baseline", "-b", help="Baseline dataset or artifact directory"),
     candidate: str = typer.Option(..., "--candidate", "-c", help="Candidate dataset or artifact directory"),
@@ -3712,7 +4072,7 @@ def _drift_impl(
 
 # ── ready ───────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def ready(
     run: str = typer.Option(..., "--run", "-r", help="Path to run directory"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -3782,7 +4142,7 @@ def _ready_impl(run: str, json_output: bool) -> None:
 
 # ── benchmark ────────────────────────────────────────────────────
 
-@app.command()
+@app.command(hidden=True)
 def benchmark(
     dataset: Optional[str] = typer.Option(None, "--dataset", "-d", help="Dataset path for ingest benchmark"),
     train: Optional[str] = typer.Option(None, "--train", "-t", help="Training dataset for contamination benchmark"),
@@ -3913,6 +4273,107 @@ def _benchmark_impl(
         
         console.print("\n[dim]Note: Verifily prioritizes determinism and accuracy over raw speed.[/dim]")
         console.print()
+
+
+# ── nl2sql ────────────────────────────────────────────────────────
+
+nl2sql_app = typer.Typer(help="NL2SQL dataset tools: validate, fingerprint, split, gate.")
+app.add_typer(nl2sql_app, name="nl2sql")
+
+
+@nl2sql_app.command("validate")
+def nl2sql_validate(
+    input_path: str = typer.Option(..., "--in", help="Path to NL2SQL JSONL dataset."),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write JSON results to file."),
+    strict: bool = typer.Option(False, "--strict", help="Fail on first invalid row."),
+    verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
+) -> None:
+    """Validate NL2SQL dataset rows for required fields.
+
+    Checks that each row has: question, sql, and schema/schema_ref.
+
+    Example:
+      verifily nl2sql validate --in data/nl2sql.jsonl
+    """
+    def _impl():
+        from verifily_cli_v1.commands.nl2sql import run_validate
+        result = run_validate(input_path=input_path, output=output, strict=strict, verbose=verbose)
+        raise SystemExit(0 if result["status"] == "PASS" else 1)
+    _run_safe(_impl, verbose=verbose)
+
+
+@nl2sql_app.command("fingerprint")
+def nl2sql_fingerprint(
+    input_path: str = typer.Option(..., "--in", help="Path to NL2SQL JSONL dataset."),
+    out_dir: str = typer.Option(..., "--out", help="Output directory for enriched dataset."),
+    verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
+) -> None:
+    """Compute SQL fingerprints and templates for each row.
+
+    Enriches rows with sql_fingerprint, sql_template, template_fingerprint.
+
+    Example:
+      verifily nl2sql fingerprint --in data/nl2sql.jsonl --out data/nl2sql_fp
+    """
+    def _impl():
+        from verifily_cli_v1.commands.nl2sql import run_fingerprint
+        run_fingerprint(input_path=input_path, out_dir=out_dir, verbose=verbose)
+    _run_safe(_impl, verbose=verbose)
+
+
+@nl2sql_app.command("split")
+def nl2sql_split(
+    input_path: str = typer.Option(..., "--in", help="Path to NL2SQL JSONL dataset."),
+    out_dir: str = typer.Option(..., "--out-dir", help="Output directory for train/eval split."),
+    eval_ratio: float = typer.Option(0.1, "--eval-ratio", help="Fraction of groups for eval."),
+    group: str = typer.Option("template", "--group", help="Grouping key: template, db_id, or schema_ref."),
+    seed: int = typer.Option(42, "--seed", help="Random seed for deterministic split."),
+    verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
+) -> None:
+    """Leakage-resistant train/eval split grouped by SQL template.
+
+    Groups rows by template_fingerprint (or db_id/schema_ref) so no
+    structural duplicates leak across the split boundary.
+
+    Example:
+      verifily nl2sql split --in dataset.jsonl --out-dir splits/ --eval-ratio 0.1
+      verifily nl2sql split --in dataset.jsonl --out-dir splits/ --group db_id
+    """
+    def _impl():
+        from verifily_cli_v1.commands.nl2sql import run_split
+        run_split(input_path=input_path, out_dir=out_dir, eval_ratio=eval_ratio,
+                  group=group, seed=seed, verbose=verbose)
+    _run_safe(_impl, verbose=verbose)
+
+
+@nl2sql_app.command("gate")
+def nl2sql_gate(
+    train_path: str = typer.Option(..., "--train", help="Path to training JSONL dataset."),
+    eval_path: str = typer.Option(..., "--eval", help="Path to eval JSONL dataset."),
+    jaccard_cutoff: float = typer.Option(0.70, "--jaccard", help="Jaccard cutoff for near-dup questions."),
+    num_perm: int = typer.Option(128, "--num-perm", help="MinHash permutations for LSH."),
+    no_lsh: bool = typer.Option(False, "--no-lsh", help="Disable LSH, use brute-force."),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write JSON results to file."),
+    verbose: bool = typer.Option(False, "--verbose", help="Show detailed output."),
+) -> None:
+    """NL2SQL-specific contamination gate.
+
+    Three-tier leakage check:
+      1. Exact SQL overlap (by sql_fingerprint)
+      2. Template overlap (by template_fingerprint)
+      3. Near-duplicate question overlap (n-gram Jaccard)
+
+    Exit codes: 0=PASS, 1=FAIL (exact leaks), 2=WARN (template/near-dup).
+
+    Example:
+      verifily nl2sql gate --train train.jsonl --eval eval.jsonl
+    """
+    def _impl():
+        from verifily_cli_v1.commands.nl2sql import run_gate
+        result = run_gate(train=train_path, eval_set=eval_path, jaccard_cutoff=jaccard_cutoff,
+                         num_perm=num_perm, use_lsh=not no_lsh, output=output, verbose=verbose)
+        raise SystemExit(result["exit_code"])
+    _run_safe(_impl, verbose=verbose)
 
 
 # ── Error handling ───────────────────────────────────────────────

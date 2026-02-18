@@ -21,28 +21,28 @@ from verifily_cli_v1.core.io import ensure_dir, write_json, write_yaml
 
 # ── Sample data (no PII, deterministic) ───────────────────────────
 
-SAMPLE_CSV_HEADER = "subject,resolution,body"
+SAMPLE_CSV_HEADER = "input,output"
 SAMPLE_CSV_ROWS = [
-    "Cannot log in,Reset your password via Settings > Security,User reports login failure after update",
-    "Slow dashboard,Clear browser cache and reload,Dashboard takes 10 seconds to load",
-    "Missing report,Reports refresh daily at midnight UTC,Quarterly report not visible",
-    "Export fails,Ensure at least 10 records exist,Export button is grayed out",
-    "Wrong balance,Go to Billing > Refresh Balance,Account shows incorrect amount",
-    "Search broken,Rebuild index via Admin > Search,Search returns zero results",
-    "Email alerts,Check Settings > Notifications,No email notifications received",
-    "Rate limited,Use exponential backoff,API returns 429 during batch jobs",
-    "Stale data,Add nocache parameter to query,Report shows yesterday data",
-    "Webhook error,Check logs and ensure 10s timeout,Webhook returns 500",
-    "Upload limit,Contact admin to increase to 50MB,File upload fails above 5MB",
-    "Widget broken,Reset dashboard layout in Settings,Widgets not rendering",
+    '"Explain what a neural network is in simple terms","A neural network is a computer system inspired by the human brain. It has layers of nodes that process information. Data flows in through input nodes and gets transformed by hidden layers to produce a result."',
+    '"Write a Python function to reverse a string","def reverse_string(s):\\n    return s[::-1]"',
+    '"What is the difference between supervised and unsupervised learning?","Supervised learning trains on labeled data where correct answers are known. Unsupervised learning finds patterns in unlabeled data without predefined answers."',
+    '"Convert this SQL query to plain English: SELECT name FROM users WHERE age > 30","Find the names of all users who are older than 30."',
+    '"Explain what overfitting means in machine learning","Overfitting happens when a model learns the training data too well including its noise. It performs great on training data but poorly on new unseen data."',
+    '"Write a Python function that checks if a number is prime","def is_prime(n):\\n    if n < 2:\\n        return False\\n    for i in range(2, int(n**0.5) + 1):\\n        if n % i == 0:\\n            return False\\n    return True"',
+    '"What is gradient descent?","Gradient descent is an optimization algorithm that adjusts model parameters step by step to minimize a loss function. It calculates the slope of the error and moves in the direction that reduces it."',
+    '"Summarize the purpose of cross-validation","Cross-validation splits data into multiple folds and trains on each combination. This gives a more reliable estimate of model performance than a single train-test split."',
+    '"What does the pandas groupby method do?","The groupby method splits a DataFrame into groups based on column values. You can then apply aggregate functions like mean or sum to each group independently."',
+    '"Explain the bias-variance tradeoff","Bias is error from oversimplified models that miss patterns. Variance is error from overly complex models that fit noise. The tradeoff means reducing one often increases the other."',
+    '"Write a list comprehension to get even numbers from 1 to 20","even_numbers = [x for x in range(1, 21) if x % 2 == 0]"',
+    '"What is transfer learning?","Transfer learning uses a model pre-trained on one task as the starting point for a different task. It saves training time and works well when you have limited data for your target task."',
 ]
 
 EVAL_ROWS = [
-    {"input": "Context:\nUser locked out\n\nQuestion:\nHow to unlock?", "output": "Reset via admin panel."},
-    {"input": "Context:\nPage timeout\n\nQuestion:\nHow to fix?", "output": "Check server load and increase timeout."},
-    {"input": "Context:\nMissing data\n\nQuestion:\nWhere is my data?", "output": "Data syncs every hour. Wait and refresh."},
-    {"input": "Context:\nPermission denied\n\nQuestion:\nHow to get access?", "output": "Request access from your project admin."},
-    {"input": "Context:\nDuplicate entry\n\nQuestion:\nHow to resolve?", "output": "Merge duplicates via the dedup tool."},
+    {"input": "Explain what a loss function is", "output": "A loss function measures how far a model's predictions are from the correct answers. Lower loss means better predictions."},
+    {"input": "Write a Python function to compute factorial", "output": "def factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)"},
+    {"input": "What is regularization in machine learning?", "output": "Regularization adds a penalty for model complexity to prevent overfitting. Common types are L1 and L2 regularization."},
+    {"input": "Explain the difference between precision and recall", "output": "Precision is the fraction of positive predictions that are correct. Recall is the fraction of actual positives that are found."},
+    {"input": "What is a learning rate?", "output": "The learning rate controls how much model weights change during each training step. Too high causes instability and too low causes slow training."},
 ]
 
 RUN_DEMO_SCRIPT = r'''#!/usr/bin/env bash
@@ -68,8 +68,7 @@ echo "--- Step 1: Ingest sample data ---"
 $CLI ingest \
   --in "$PROJECT_DIR/data/raw/sample.csv" \
   --out "$PROJECT_DIR/data/artifact" \
-  --schema sft \
-  --map question:subject --map answer:resolution --map context:body
+  --schema sft
 echo ""
 
 # Step 2: Build pipeline config with absolute paths
@@ -146,7 +145,7 @@ cat data/artifact/report.json | python3 -m json.tool
 
 ## What this does
 
-1. **Ingest** — converts `data/raw/sample.csv` into canonical dataset artifacts
+1. **Ingest** — converts `data/raw/sample.csv` (SFT training pairs) into canonical dataset artifacts
 2. **Pipeline** — runs CONTRACT → REPORT → CONTAMINATION → DECISION gate
 3. **Result** — prints SHIP/DONT_SHIP decision with exit code
 
@@ -214,7 +213,6 @@ def scaffold(path: str, *, force: bool = False) -> Dict[str, Any]:
     config = {
         "schema": "sft",
         "ingest": {
-            "mapping": {"question": "subject", "answer": "resolution", "context": "body"},
             "tags": {"source": "quickstart"},
         },
         "ship_if": {
